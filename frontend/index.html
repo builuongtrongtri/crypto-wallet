@@ -1,0 +1,322 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CryptoVault — Simulated Blockchain Wallet</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Mono:ital,wght@0,400;0,700;1,400&family=Syne:wght@400;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div id="app">
+
+  <!-- SIDEBAR -->
+  <aside id="sidebar">
+    <div class="logo">
+      <div class="logo-icon">⬡</div>
+      <span>CryptoVault</span>
+    </div>
+
+    <div id="wallet-list-sidebar"></div>
+
+    <button class="btn-new-wallet" onclick="openModal('create-wallet-modal')">+ New Wallet</button>
+    <button class="btn-import" onclick="openModal('import-wallet-modal')">↑ Import</button>
+
+    <div class="sidebar-bottom">
+      <div class="chain-status">
+        <span class="dot" id="chain-dot"></span>
+        <span id="chain-label">SimNet v1</span>
+      </div>
+      <div id="block-counter" class="block-counter">Block #0</div>
+    </div>
+  </aside>
+
+  <!-- MAIN CONTENT -->
+  <main id="main">
+    <div id="no-wallet-screen" class="center-screen">
+      <div class="hero-icon">⬡</div>
+      <h1>CryptoVault</h1>
+      <p>Simulated blockchain wallet · ECDSA signatures · Local ledger</p>
+      <div class="hero-actions">
+        <button class="btn-primary" onclick="openModal('create-wallet-modal')">Create Wallet</button>
+        <button class="btn-ghost" onclick="openModal('import-wallet-modal')">Import Private Key</button>
+      </div>
+    </div>
+
+    <div id="wallet-screen" style="display:none">
+      <!-- HEADER -->
+      <div class="wallet-header">
+        <div class="wallet-info">
+          <div class="wallet-label">Active Wallet</div>
+          <div class="wallet-address-row">
+            <span id="hdr-address" class="monospace"></span>
+            <button class="copy-btn" onclick="copyAddress()">⎘</button>
+          </div>
+          <div id="hdr-pubkey" class="pubkey-row monospace"></div>
+          <div class="wallet-actions-row">
+            <button class="wallet-action-btn" onclick="openModal('backup-modal')" id="btn-backup-phrase">🔑 Recovery Phrase</button>
+            <button class="wallet-action-btn" onclick="openModal('export-wallet-modal')">🗝 Private Key</button>
+          </div>
+        </div>
+        <div class="balance-display">
+          <div class="balance-label">Balance</div>
+          <div id="hdr-balance" class="balance-amount">0.0000</div>
+          <div id="hdr-pending" class="balance-pending"></div>
+        </div>
+      </div>
+
+      <!-- TABS -->
+      <div class="tabs">
+        <button class="tab active" data-tab="send">Send</button>
+        <button class="tab" data-tab="history">History</button>
+        <button class="tab" data-tab="pending">Pending <span id="pending-badge" class="badge">0</span></button>
+        <button class="tab" data-tab="blockchain">Blockchain</button>
+        <button class="tab" data-tab="attack">⚔️ Attack Demos</button>
+      </div>
+
+      <!-- SEND TAB -->
+      <div id="tab-send" class="tab-content active">
+        <div class="send-form">
+          <h2>Send Transaction</h2>
+          <div class="form-group">
+            <label>Recipient Address</label>
+            <input type="text" id="send-to" placeholder="0x..." class="monospace">
+          </div>
+          <div class="form-group">
+            <label>Amount</label>
+            <div class="amount-row">
+              <input type="number" id="send-amount" placeholder="0.0" min="0.0001" step="0.0001">
+              <span class="coin-label">CVT</span>
+            </div>
+          </div>
+          <div class="form-group">
+            <label>Note (optional)</label>
+            <input type="text" id="send-note" placeholder="Payment for...">
+          </div>
+          <div class="form-group">
+            <label>Wallet Password</label>
+            <input type="password" id="send-password" placeholder="••••••••">
+          </div>
+          <div id="send-error" class="error-msg"></div>
+          <button class="btn-primary btn-send" onclick="sendTransaction()">
+            <span>Sign & Broadcast</span>
+            <span class="btn-icon">→</span>
+          </button>
+        </div>
+
+        <div class="quick-wallets" id="quick-wallets">
+          <div class="section-label">Quick Send To</div>
+          <div id="quick-wallet-list"></div>
+        </div>
+      </div>
+
+      <!-- HISTORY TAB -->
+      <div id="tab-history" class="tab-content">
+        <h2>Transaction History</h2>
+        <div id="history-list" class="tx-list"></div>
+      </div>
+
+      <!-- PENDING TAB -->
+      <div id="tab-pending" class="tab-content">
+        <div class="pending-header">
+          <h2>Mempool — Pending Transactions</h2>
+          <button class="btn-mine" onclick="mineBlock()">⛏ Confirm Block</button>
+        </div>
+        <div id="mining-countdown" class="mining-countdown"></div>
+        <div id="pending-list" class="tx-list"></div>
+      </div>
+
+      <!-- BLOCKCHAIN TAB -->
+      <div id="tab-blockchain" class="tab-content">
+        <div class="blockchain-header">
+          <h2>Blockchain Ledger</h2>
+          <div id="chain-validity" class="validity-badge"></div>
+        </div>
+        <div id="blockchain-list" class="block-list"></div>
+      </div>
+
+      <!-- ATTACK DEMOS TAB -->
+      <div id="tab-attack" class="tab-content">
+        <h2>Security Attack Demos</h2>
+        <div class="attack-grid">
+
+          <div class="attack-card" id="attack-tamper">
+            <div class="attack-icon">🔨</div>
+            <h3>Data Tampering</h3>
+            <p>Modify a transaction amount after signing. Shows hash invalidation.</p>
+            <div class="attack-controls">
+              <select id="tamper-tx-select"><option value="">Select a confirmed tx...</option></select>
+              <input type="number" id="tamper-new-amount" placeholder="New fake amount" step="0.01">
+              <button class="btn-attack" onclick="runTamperAttack()">Run Attack</button>
+            </div>
+            <div id="tamper-result" class="attack-result"></div>
+          </div>
+
+          <div class="attack-card" id="attack-double-spend">
+            <div class="attack-icon">⚡</div>
+            <h3>Double Spending</h3>
+            <p>Send 2 transactions simultaneously exceeding balance. Race condition demo.</p>
+            <div class="attack-controls">
+              <input type="text" id="ds-to" placeholder="Target address (0x...)">
+              <input type="number" id="ds-amount" placeholder="Amount per tx" step="0.1">
+              <input type="password" id="ds-password" placeholder="Wallet password">
+              <button class="btn-attack" onclick="runDoubleSpend()">Send Both</button>
+            </div>
+            <div id="ds-result" class="attack-result"></div>
+          </div>
+
+          <div class="attack-card" id="attack-fake-sig">
+            <div class="attack-icon">🎭</div>
+            <h3>Fake Signature</h3>
+            <p>Verify a transaction whose signature was made with a different private key.</p>
+            <div class="attack-controls">
+              <select id="fake-sig-tx"><option value="">Select a pending/confirmed tx...</option></select>
+              <button class="btn-attack" onclick="runFakeSigAttack()">Simulate</button>
+            </div>
+            <div id="fakesig-result" class="attack-result"></div>
+          </div>
+
+          <div class="attack-card" id="attack-multisig">
+            <div class="attack-icon">🔏</div>
+            <h3>Multi-Signature (2/3)</h3>
+            <p>Collect 2 of 3 signatures to authorize a transaction.</p>
+            <div class="attack-controls">
+              <div id="multisig-wallets"></div>
+              <input type="text" id="ms-to" placeholder="Recipient address">
+              <input type="number" id="ms-amount" placeholder="Amount" step="0.1">
+              <button class="btn-attack" onclick="runMultiSig()">Collect Signatures</button>
+            </div>
+            <div id="multisig-result" class="attack-result"></div>
+          </div>
+
+        </div>
+      </div>
+    </div>
+  </main>
+</div>
+
+<!-- MODALS -->
+<div id="modal-overlay" onclick="closeAllModals()"></div>
+
+<!-- CREATE WALLET — Step 1: options -->
+<div id="create-wallet-modal" class="modal">
+  <button class="modal-close" onclick="closeAllModals()">✕</button>
+  <h2>Create New Wallet</h2>
+  <p class="modal-sub">Generates a BIP-39 mnemonic → BIP-44 HD key (m/44'/60'/0'/0/0), same as MetaMask.</p>
+  <div class="form-group">
+    <label>Recovery Phrase Length</label>
+    <div class="word-count-selector">
+      <button class="wc-btn active" data-wc="12" onclick="selectWordCount(12, this)">12 words</button>
+      <button class="wc-btn" data-wc="24" onclick="selectWordCount(24, this)">24 words</button>
+    </div>
+  </div>
+  <div class="form-group">
+    <label>Wallet Password <span class="label-hint">(encrypts your key locally)</span></label>
+    <input type="password" id="create-password" placeholder="Choose a strong password">
+  </div>
+  <div id="create-error" class="error-msg"></div>
+  <button class="btn-primary" onclick="createWallet()" id="create-btn">
+    <span id="create-btn-text">Generate Wallet</span>
+  </button>
+</div>
+
+<!-- CREATE WALLET — Step 2: show mnemonic -->
+<div id="mnemonic-display-modal" class="modal modal-wide">
+  <h2>🔐 Your Recovery Phrase</h2>
+  <div class="warning-box">⚠️ Write these words down in order. Never share them. This screen won't appear again.</div>
+  <div id="mnemonic-grid" class="mnemonic-grid"></div>
+  <div class="mnemonic-meta" id="mnemonic-meta"></div>
+  <div class="mnemonic-confirm-row">
+    <input type="checkbox" id="mnemonic-saved-cb">
+    <label for="mnemonic-saved-cb">I have written down my recovery phrase securely</label>
+  </div>
+  <button class="btn-primary" onclick="confirmMnemonicSaved()" style="margin-top:16px;width:100%">Continue →</button>
+</div>
+
+<!-- IMPORT WALLET -->
+<div id="import-wallet-modal" class="modal modal-wide">
+  <button class="modal-close" onclick="closeAllModals()">✕</button>
+  <h2>Import Wallet</h2>
+
+  <div class="import-tabs">
+    <button class="import-tab active" onclick="switchImportTab('mnemonic', this)">Recovery Phrase</button>
+    <button class="import-tab" onclick="switchImportTab('privkey', this)">Private Key</button>
+  </div>
+
+  <!-- Mnemonic import -->
+  <div id="import-tab-mnemonic">
+    <p class="modal-sub" style="margin-bottom:16px">Enter your 12 or 24-word BIP-39 recovery phrase, separated by spaces.</p>
+    <div id="mnemonic-input-grid" class="mnemonic-input-grid">
+      <!-- filled by JS -->
+    </div>
+    <div class="form-group" style="margin-top:16px">
+      <label>Derivation Index <span class="label-hint">(0 = first account, same as MetaMask default)</span></label>
+      <input type="number" id="import-mnemonic-index" value="0" min="0" max="99" style="width:100px">
+    </div>
+    <div class="form-group">
+      <label>Wallet Password</label>
+      <input type="password" id="import-mnemonic-password" placeholder="Choose a password">
+    </div>
+    <div id="import-mnemonic-error" class="error-msg"></div>
+    <button class="btn-primary" onclick="importFromMnemonic()">Import from Phrase</button>
+  </div>
+
+  <!-- Private key import -->
+  <div id="import-tab-privkey" style="display:none">
+    <div class="form-group">
+      <label>Private Key (64 hex chars)</label>
+      <input type="text" id="import-privkey" placeholder="a1b2c3d4..." class="monospace">
+    </div>
+    <div class="form-group">
+      <label>Wallet Password</label>
+      <input type="password" id="import-password" placeholder="Choose a password">
+    </div>
+    <div id="import-error" class="error-msg"></div>
+    <button class="btn-primary" onclick="importWallet()">Import from Private Key</button>
+  </div>
+</div>
+
+<!-- BACKUP MODAL (view mnemonic again) -->
+<div id="backup-modal" class="modal modal-wide">
+  <button class="modal-close" onclick="closeAllModals()">✕</button>
+  <h2>🔑 Backup Recovery Phrase</h2>
+  <div class="warning-box">⚠️ Keep this safe. Anyone with this phrase controls your wallet forever.</div>
+  <div class="form-group">
+    <label>Wallet Password</label>
+    <input type="password" id="backup-password" placeholder="Your wallet password">
+  </div>
+  <div id="backup-error" class="error-msg"></div>
+  <button class="btn-primary" onclick="revealMnemonic()">Reveal Phrase</button>
+  <div id="backup-mnemonic-result" style="display:none;margin-top:16px">
+    <div id="backup-mnemonic-grid" class="mnemonic-grid"></div>
+    <div id="backup-meta" class="mnemonic-meta"></div>
+  </div>
+</div>
+
+<!-- EXPORT PRIVATE KEY -->
+<div id="export-wallet-modal" class="modal">
+  <button class="modal-close" onclick="closeAllModals()">✕</button>
+  <h2>Export Private Key</h2>
+  <div class="warning-box">⚠️ Never share your private key. Anyone with it controls your wallet.</div>
+  <div class="form-group">
+    <label>Password</label>
+    <input type="password" id="export-password" placeholder="Your wallet password">
+  </div>
+  <div id="export-error" class="error-msg"></div>
+  <button class="btn-primary" onclick="doExport()">Reveal Private Key</button>
+  <div id="export-result" class="export-key-display" style="display:none"></div>
+</div>
+
+<!-- TX DETAIL -->
+<div id="tx-detail-modal" class="modal modal-wide">
+  <button class="modal-close" onclick="closeAllModals()">✕</button>
+  <h2>Transaction Detail</h2>
+  <div id="tx-detail-content"></div>
+</div>
+
+<div id="toast" class="toast"></div>
+
+<script src="js/app.js"></script>
+</body>
+</html>
