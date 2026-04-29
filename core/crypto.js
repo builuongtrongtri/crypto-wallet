@@ -1,28 +1,44 @@
 const crypto = require('crypto');
-const EC = require('elliptic').ec;
-const ec = new EC('secp256k1');
 
-function generatePrivateKey() {
-  return crypto.randomBytes(32).toString('hex');
+async function encryptMnemonic(mnemonic, password) {
+  const salt = crypto.randomBytes(16).toString("hex");
+  const key = crypto.scryptSync(password, salt, 32);
+
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv("aes-256-gcm", key, iv);
+
+  let encrypted = cipher.update(mnemonic, "utf8", "hex");
+  encrypted += cipher.final("hex");
+
+  const authTag = cipher.getAuthTag().toString("hex");
+
+  return {
+    encryptedMnemonic: encrypted,
+    iv: iv.toString("hex"),
+    salt,
+    authTag
+  }
 }
 
-function getPublicKey(privateKeyHex) {
-  const keyPair = ec.keyFromPrivate(privateKeyHex, 'hex');
-  return keyPair.getPublic('hex');
+function decryptMnemonic(vault, password) {
+  const { encryptedMnemonic, iv, salt, authTag } = vault;
+
+  // derive key giống lúc encrypt
+  const key = crypto.scryptSync(password, salt, 32);
+
+  const decipher = crypto.createDecipheriv(
+    "aes-256-gcm",
+    key,
+    Buffer.from(iv, "hex")
+  );
+
+  // set authTag
+  decipher.setAuthTag(Buffer.from(authTag, "hex"));
+
+  let decrypted = decipher.update(encryptedMnemonic, "hex", "utf8");
+  decrypted += decipher.final("utf8");
+
+  return decrypted;
 }
 
-function publicKeyToAddress(publicKeyHex) {
-  const hash = crypto.createHash('sha256').update(Buffer.from(publicKeyHex, 'hex')).digest();
-  const ripemd = crypto.createHash('ripemd160').update(hash).digest('hex');
-  return '0x' + ripemd;
-}
-
-function hashData(data) {
-  return crypto.createHash('sha256').update(JSON.stringify(data)).digest('hex');
-}
-
-function sha256(str) {
-  return crypto.createHash('sha256').update(str).digest('hex');
-}
-
-module.exports = { generatePrivateKey, getPublicKey, publicKeyToAddress, hashData, sha256 };
+module.exports = { encryptMnemonic, decryptMnemonic };

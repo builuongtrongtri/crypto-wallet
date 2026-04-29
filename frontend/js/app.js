@@ -1,7 +1,7 @@
 const API = 'http://localhost:3000/api';
 let activeWallet = null;
 let allWallets = [];
-let lastTxRef = null; // for tamper/fake-sig demos
+let lastTxRef = null;
 
 // ── UTILS ───────────────────────────────────────────────
 function fmt(addr) { return addr ? addr.slice(0, 10) + '...' + addr.slice(-6) : '—'; }
@@ -31,6 +31,13 @@ function toast(msg, type = 'info') {
   setTimeout(() => el.className = 'toast', 3000);
 }
 
+function showUnlockScreen() {
+  document.getElementById('unlock-screen').style.display = 'flex';
+}
+function showCreateWalletScreen() {
+  document.getElementById('create-wallet-screen').style.display = 'flex';
+}
+
 // ── MODAL ───────────────────────────────────────────────
 function openModal(id) {
   document.getElementById('modal-overlay').classList.add('active');
@@ -40,6 +47,12 @@ function closeAllModals() {
   document.getElementById('modal-overlay').classList.remove('active');
   document.querySelectorAll('.modal').forEach(m => m.classList.remove('active'));
   document.querySelectorAll('.error-msg').forEach(e => e.textContent = '');
+
+  document.getElementById('create-password').value = '';
+  document.getElementById('confirm-password').value = '';
+
+  document.getElementById('mnemonic-grid').innerHTML = '';
+  document.getElementById('mnemonic-meta').textContent = '';
 }
 
 // ── TABS ────────────────────────────────────────────────
@@ -52,47 +65,99 @@ document.querySelectorAll('.tab').forEach(tab => {
 
     const tabName = tab.dataset.tab;
     if (tabName === 'history') loadHistory();
-    if (tabName === 'pending') loadPending();
-    if (tabName === 'blockchain') loadBlockchain();
-    if (tabName === 'attack') loadAttackData();
+    if (tabName === 'tokens') loadTokens();
   });
 });
 
 // ── WALLET CREATION ──────────────────────────────────────
 let _selectedWordCount = 12;
 
-function selectWordCount(n, btn) {
-  _selectedWordCount = n;
-  document.querySelectorAll('.wc-btn').forEach(b => b.classList.remove('active'));
-  btn.classList.add('active');
-}
-
 async function createWallet() {
   const pw = document.getElementById('create-password').value;
+  const cpw = document.getElementById('confirm-password').value;
   if (!pw || pw.length < 4) {
     document.getElementById('create-error').textContent = 'Password must be at least 4 characters';
     return;
   }
+  if (pw !== cpw) {
+    document.getElementById('create-error').textContent = 'Passwords do not match';
+    return;
+  }
   const btn = document.getElementById('create-btn-text');
-  btn.textContent = 'Generating...';
+  btn.textContent = 'Creating...';
+  btn.disabled = true;
   document.getElementById('create-error').textContent = '';
 
   try {
     const data = await api('/wallet/create', {
       method: 'POST',
-      body: JSON.stringify({ password: pw, wordCount: _selectedWordCount })
+      body: JSON.stringify({ password: pw })
     });
     closeAllModals();
-    await refreshAll();
-    selectWallet(data.address);
+    // await refreshAll();
+    // selectWallet(data.address);
+
     // Show mnemonic display modal
     showMnemonicDisplay(data.mnemonic, data.address);
+    await saveWallet({
+      address: data.address,
+      encryptedMnemonic: data.vault.encryptedMnemonic,
+      iv: data.vault.iv,
+      salt: data.vault.salt,
+      authTag: data.vault.authTag
+    });
+    activeWallet = { address: data.address };
+    showWallet(data.address);
     toast(`Wallet created!`, 'success');
   } catch (e) {
     document.getElementById('create-error').textContent = e.message;
   } finally {
     btn.textContent = 'Generate Wallet';
   }
+}
+
+async function unlockWallet() {
+  const pw = document.getElementById('password').value;
+  if (!pw) {
+    toast('Password required', 'error');
+    return;
+  }
+  try {
+    const walletData = await getWallet();
+    if (!walletData) {
+      toast('No wallet found', 'error');
+      return;
+    }
+
+    const data = await api('/wallet/unlock', { 
+      method: 'POST', 
+      body: JSON.stringify({ 
+        password: pw,
+        vault: walletData
+      }) 
+    });
+    activeWallet = ethers.Wallet.fromPhrase(data.mnemonic);
+    showWallet(activeWallet);
+    toast('Wallet unlocked!', 'success');
+  } catch (e) {
+    toast(e.message, 'error');
+  }
+}
+
+function showWallet(wallet) {
+  document.getElementById('no-wallet-screen').style.display = 'none';
+  document.getElementById('wallet-screen').style.display = 'block';
+
+  document.getElementById('hdr-address').textContent = wallet.address;
+  document.getElementById('hdr-pubkey').textContent = wallet.publicKey
+    ? wallet.publicKey.slice(0, 40) + '...' : '';
+
+  refreshBalance();
+  loadTokens();
+  // renderSidebar();
+  // renderQuickWallets();
+  // loadHistory();
+  // loadPending();
 }
 
 function showMnemonicDisplay(mnemonic, address) {
@@ -247,39 +312,44 @@ function copyAddress() {
 }
 
 // ── SELECT WALLET ────────────────────────────────────────
-function selectWallet(address) {
-  activeWallet = allWallets.find(w => w.address === address);
-  if (!activeWallet) return;
+// function selectWallet(address) {
+//   activeWallet = allWallets.find(w => w.address === address);
+//   if (!activeWallet) return;
 
-  document.getElementById('no-wallet-screen').style.display = 'none';
-  document.getElementById('wallet-screen').style.display = 'block';
+//   document.getElementById('no-wallet-screen').style.display = 'none';
+//   document.getElementById('wallet-screen').style.display = 'block';
 
-  document.getElementById('hdr-address').textContent = activeWallet.address;
-  document.getElementById('hdr-pubkey').textContent = activeWallet.publicKey
-    ? activeWallet.publicKey.slice(0, 40) + '...' : '';
+//   document.getElementById('hdr-address').textContent = activeWallet.address;
+//   document.getElementById('hdr-pubkey').textContent = activeWallet.publicKey
+//     ? activeWallet.publicKey.slice(0, 40) + '...' : '';
 
-  refreshBalance();
-  renderSidebar();
-  renderQuickWallets();
-  loadHistory();
-  loadPending();
-}
+//   refreshBalance();
+//   renderSidebar();
+//   renderQuickWallets();
+//   loadHistory();
+//   loadPending();
+// }
 
 async function refreshBalance() {
   if (!activeWallet) return;
   try {
-    const data = await api(`/wallet/${activeWallet.address}/balance`);
-    document.getElementById('hdr-balance').textContent = parseFloat(data.confirmed).toFixed(4);
-    if (data.pendingOut > 0) {
-      document.getElementById('hdr-pending').textContent = `−${data.pendingOut.toFixed(4)} CVT pending`;
-    } else if (data.pendingIn > 0) {
-      document.getElementById('hdr-pending').textContent = `+${data.pendingIn.toFixed(4)} CVT incoming`;
-    } else {
-      document.getElementById('hdr-pending').textContent = '';
-    }
-    activeWallet.balance = data.confirmed;
-    activeWallet.available = data.available;
-  } catch (e) {}
+    const data = await api(`/wallet/${activeWallet.address}/eth-balance`);
+    const marketData = await api('/tokens/market');
+    const ethPriceUSD = marketData.ethereum.priceUSD;
+
+    document.getElementById('hdr-balance').textContent = '$' + parseFloat(data.balance * ethPriceUSD).toFixed(2);
+    // if (data.pendingOut > 0) {
+    //   document.getElementById('hdr-pending').textContent = `−${data.pendingOut.toFixed(4)} CVT pending`;
+    // } else if (data.pendingIn > 0) {
+    //   document.getElementById('hdr-pending').textContent = `+${data.pendingIn.toFixed(4)} CVT incoming`;
+    // } else {
+    //   document.getElementById('hdr-pending').textContent = '';
+    // }
+    // activeWallet.balance = data.confirmed;
+    // activeWallet.available = data.available;
+  } catch (e) {
+
+  }
 }
 
 // ── RENDER SIDEBAR ───────────────────────────────────────
@@ -346,74 +416,95 @@ async function loadHistory() {
   const el = document.getElementById('history-list');
   try {
     const data = await api(`/transaction/history/${activeWallet.address}`);
-    if (!data.confirmed.length) {
+    if (!data.transactions || !data.transactions.length) {
       el.innerHTML = '<div style="color:var(--text3);font-size:13px;padding:20px">No transactions yet.</div>';
       return;
     }
-    el.innerHTML = data.confirmed.map(tx => renderTxItem(tx, activeWallet.address, 'confirmed')).join('');
+    el.innerHTML = data.transactions.map(tx => renderTxItem(tx, activeWallet.address, 'confirmed')).join('');
   } catch (e) { el.innerHTML = '<div style="color:var(--red)">Error loading history</div>'; }
 }
 
-async function loadPending() {
+// ── LOAD TOKENS ──────────────────────────────────────────
+async function loadTokens() {
   if (!activeWallet) return;
-  const el = document.getElementById('pending-list');
+  const el = document.getElementById('token-list');
+  
   try {
-    const data = await api('/transactions/pending');
-    const count = data.length;
-    document.getElementById('pending-badge').textContent = count;
+    // Get balance from wallet
+    const balanceData = await api(`/wallet/${activeWallet.address}/eth-balance`);
+    const balance = parseFloat(balanceData.balance);
 
-    if (!count) {
-      el.innerHTML = '<div style="color:var(--text3);font-size:13px;padding:20px">Mempool is empty. No pending transactions.</div>';
-      document.getElementById('mining-countdown').textContent = '';
-      return;
-    }
-    el.innerHTML = data.map(tx => renderTxItem(tx, activeWallet.address, 'pending')).join('');
-    document.getElementById('mining-countdown').textContent = `⏱ Auto-confirm in ~10s · ${count} transaction(s) queued`;
-  } catch (e) {}
+    // Get price from API
+    const data = await api('/tokens/market');
+
+    // Sample token data - in production, fetch from price API
+    const tokens = [
+      {
+        name: 'Ethereum',
+        symbol: 'ETH',
+        icon: '⟠',
+        price: balance * data.ethereum.priceUSD,
+        change24h: data.ethereum.change24h,
+        balance: balance,
+        badge: 'Earn'
+      },
+      {
+        name: 'Solana',
+        symbol: 'SOL',
+        icon: '◎',
+        price: 0 * data.solana.priceUSD,
+        change24h: data.solana.change24h,
+        balance: 0,
+        badge: ''
+      },
+      {
+        name: 'Bitcoin',
+        symbol: 'BTC',
+        icon: '₿',
+        price: 0 * data.bitcoin.priceUSD,
+        change24h: data.bitcoin.change24h,
+        balance: 0,
+        badge: 'Native SegWit'
+      }
+    ];
+
+    el.innerHTML = tokens.map(token => renderTokenItem(token)).join('');
+  } catch (e) {
+    el.innerHTML = '<div style="color:var(--red);padding:20px">Error loading tokens</div>';
+  }
 }
 
-async function loadBlockchain() {
-  const el = document.getElementById('blockchain-list');
-  try {
-    const data = await api('/blockchain');
-    document.getElementById('chain-validity').textContent = data.valid ? '✓ Chain Valid' : '✗ Chain Invalid';
-    document.getElementById('chain-validity').className = 'validity-badge ' + (data.valid ? 'valid' : 'invalid');
-    document.getElementById('block-counter').textContent = `Block #${data.length - 1}`;
-
-    el.innerHTML = data.chain.slice().reverse().map(block => `
-      <div class="block-item">
-        <div class="block-header">
-          <div class="block-index ${block.index === 0 ? 'block-genesis' : ''}">
-            ${block.index === 0 ? '⬡ Genesis Block' : `Block #${block.index}`}
-          </div>
-          <span style="font-size:12px;color:var(--text3)">${block.timestamp ? fmtTime(block.timestamp) : 'Genesis'}</span>
-        </div>
-        <div class="block-hash">Hash: <span>${block.hash}</span></div>
-        <div class="block-hash">Prev: <span>${block.previousHash.slice(0, 32)}...</span></div>
-        <div class="block-txcount">${block.transactions.length} transaction(s)</div>
-        ${block.transactions.length > 0 ? `
-          <div class="block-txs">
-            ${block.transactions.map(tx => `
-              <div class="mini-tx" onclick="showTxDetail(${JSON.stringify(tx).replace(/"/g,'&quot;')})">
-                ${fmt(tx.from)} → ${fmt(tx.to)} · ${tx.amount} CVT
-              </div>
-            `).join('')}
-          </div>
-        ` : ''}
+function renderTokenItem(token) {
+  const changeClass = token.change24h >= 0 ? 'positive' : 'negative';
+  const changeSign = token.change24h >= 0 ? '↑' : '↓';
+  const badgeHtml = token.badge ? ` <span class="token-badge">${token.badge}</span>` : '';
+  
+  return `
+    <div class="token-item">
+      <div class="token-icon">${token.icon}</div>
+      <div class="token-info">
+        <div class="token-name">${token.name}${badgeHtml}</div>
+        <div class="token-change ${changeClass}">${changeSign}${Math.abs(token.change24h).toFixed(2)}%</div>
       </div>
-    `).join('');
-  } catch (e) {}
+      <div class="token-stats">
+        <div class="token-price">$${token.price.toFixed(2)}</div>
+        <div class="token-balance">${token.balance.toFixed(4)} ${token.symbol}</div>
+      </div>
+    </div>
+  `;
 }
+
+
 
 function renderTxItem(tx, myAddress, status) {
   const isOut = tx.from === myAddress;
   const dir = isOut ? 'out' : 'in';
-  const icon = status === 'pending' ? '⏳' : isOut ? '↑' : '↓';
+  const icon = isOut ? '↑' : '↓';
   const txJson = JSON.stringify(tx).replace(/"/g, '&quot;');
 
   return `
     <div class="tx-item" onclick="showTxDetail(JSON.parse(this.dataset.tx))" data-tx="${txJson}">
-      <div class="tx-icon ${status === 'pending' ? 'pending' : dir}">${icon}</div>
+      <div class="tx-icon ${dir}">${icon}</div>
       <div class="tx-info">
         <div class="tx-parties">${fmt(tx.from)} → ${fmt(tx.to)}</div>
         <div class="tx-time">${fmtTime(tx.timestamp)}</div>
@@ -421,7 +512,7 @@ function renderTxItem(tx, myAddress, status) {
       </div>
       <div class="tx-amount">
         <div class="tx-amount-val ${dir}">${fmtAmt(tx.amount, dir)} CVT</div>
-        <div class="tx-status ${status}">${status}</div>
+        <div class="tx-status confirmed">CONFIRMED</div>
       </div>
     </div>
   `;
@@ -440,7 +531,6 @@ function showTxDetail(tx) {
     <div class="detail-row"><div class="detail-label">Hash (SHA-256)</div><div class="detail-val">${tx.hash || '—'}</div></div>
     <div class="detail-row"><div class="detail-label">ECDSA Signature</div><div class="detail-val">${sigStr}</div></div>
     <div class="detail-row"><div class="detail-label">Public Key</div><div class="detail-val">${tx.publicKey || '—'}</div></div>
-    <div class="detail-row"><div class="detail-label">Status</div><div class="detail-val ${tx.status === 'confirmed' ? 'ok' : ''}">${(tx.status || '?').toUpperCase()}</div></div>
     <div style="margin-top:8px">
       <button class="btn-primary" style="font-size:13px;padding:8px 16px" onclick="closeAllModals();openModal('export-wallet-modal')">Export Private Key</button>
     </div>
@@ -448,206 +538,36 @@ function showTxDetail(tx) {
   openModal('tx-detail-modal');
 }
 
-// ── MINING ───────────────────────────────────────────────
-async function mineBlock() {
-  try {
-    const data = await api('/mine', { method: 'POST' });
-    if (data.block) {
-      toast(`Block #${data.block.index} confirmed! ${data.block.transactions.length} tx(s)`, 'success');
-      await refreshAll();
-      loadPending();
-      loadBlockchain();
-    } else {
-      toast('No pending transactions to mine', 'info');
-    }
-  } catch (e) { toast(e.message, 'error'); }
-}
-
-// ── ATTACK DEMOS ──────────────────────────────────────────
-async function loadAttackData() {
-  try {
-    const [blockchain, pending] = await Promise.all([
-      api('/blockchain'),
-      api('/transactions/pending')
-    ]);
-
-    // Collect all txs for tamper select
-    const allTxs = [];
-    blockchain.chain.forEach(b => b.transactions.forEach(tx => allTxs.push(tx)));
-    pending.pending.forEach(tx => allTxs.push(tx));
-
-    const tamperSel = document.getElementById('tamper-tx-select');
-    const fakeSigSel = document.getElementById('fake-sig-tx');
-    const opts = allTxs.map(tx => `<option value="${tx.txId}">${tx.txId.slice(0, 20)}... | ${tx.amount} CVT</option>`).join('');
-    tamperSel.innerHTML = '<option value="">Select a tx...</option>' + opts;
-    fakeSigSel.innerHTML = '<option value="">Select a tx...</option>' + opts;
-
-    // Populate multisig wallet list
-    const wallets = await api('/wallets');
-    const msEl = document.getElementById('multisig-wallets');
-    msEl.innerHTML = wallets.map((w, i) => `
-      <div class="ms-signer-row">
-        <input type="checkbox" id="ms-${i}" value="${w.address}">
-        <label for="ms-${i}">${fmt(w.address)}</label>
-        <input type="password" id="ms-pw-${i}" placeholder="password">
-      </div>
-    `).join('');
-
-    // Store all txs for lookup
-    window._allTxsCache = allTxs;
-  } catch (e) {}
-}
-
-async function runTamperAttack() {
-  const txId = document.getElementById('tamper-tx-select').value;
-  const newAmount = parseFloat(document.getElementById('tamper-new-amount').value);
-  const el = document.getElementById('tamper-result');
-
-  if (!txId || isNaN(newAmount)) { el.className = 'attack-result info'; el.textContent = 'Select a transaction and enter a fake amount.'; return; }
-
-  const tx = window._allTxsCache?.find(t => t.txId === txId);
-  if (!tx) { el.textContent = 'Transaction not found.'; return; }
-
-  try {
-    const result = await api('/attack/tamper', {
-      method: 'POST',
-      body: JSON.stringify({ tx, newAmount })
-    });
-    el.className = 'attack-result fail';
-    el.textContent = `🔨 TAMPER ATTACK\n━━━━━━━━━━━━━━━━━━━━\nOriginal amount: ${result.originalAmount} CVT\nForged amount:   ${result.tamperedAmount} CVT\n\nHash valid:      ${result.hashValid ? '✓' : '✗ FAIL'}\nSignature valid: ${result.sigValid ? '✓' : '✗ FAIL'}\nTamper detected: ${result.detected ? '✓ YES — Attack blocked!' : '✗ Missed'}\n\n→ SHA-256 hash mismatch exposes the forgery.`;
-  } catch (e) { el.className = 'attack-result fail'; el.textContent = e.message; }
-}
-
-async function runDoubleSpend() {
-  const to = document.getElementById('ds-to').value.trim();
-  const amount = parseFloat(document.getElementById('ds-amount').value);
-  const password = document.getElementById('ds-password').value;
-  const el = document.getElementById('ds-result');
-  el.className = 'attack-result info';
-  el.textContent = 'Sending 2 transactions simultaneously...';
-
-  if (!to || !amount || !password) { el.textContent = 'Fill all fields.'; return; }
-
-  const tx1 = api('/transaction/send', { method: 'POST', body: JSON.stringify({ from: activeWallet.address, to, amount, password, note: 'DS-tx1' }) });
-  const tx2 = api('/transaction/send', { method: 'POST', body: JSON.stringify({ from: activeWallet.address, to, amount, password, note: 'DS-tx2' }) });
-
-  const [r1, r2] = await Promise.allSettled([tx1, tx2]);
-
-  const s1 = r1.status === 'fulfilled' ? '✓ Accepted (pending)' : `✗ Rejected: ${r1.reason?.message}`;
-  const s2 = r2.status === 'fulfilled' ? '✓ Accepted (pending)' : `✗ Rejected: ${r2.reason?.message}`;
-
-  el.className = 'attack-result ' + (r1.status !== r2.status ? 'success' : 'fail');
-  el.textContent = `⚡ DOUBLE SPEND ATTACK\n━━━━━━━━━━━━━━━━━━━━━\nTX 1 (${amount} CVT): ${s1}\nTX 2 (${amount} CVT): ${s2}\n\n→ Balance locking prevents double-spend.\n→ Only one TX is accepted if balance insufficient.`;
-
-  await refreshAll();
-  loadPending();
-}
-
-async function runFakeSigAttack() {
-  const txId = document.getElementById('fake-sig-tx').value;
-  const el = document.getElementById('fakesig-result');
-  if (!txId) { el.className = 'attack-result info'; el.textContent = 'Select a transaction.'; return; }
-
-  try {
-    const tx = window._allTxsCache?.find(t => t.txId === txId);
-    const result = await api('/attack/fake-signature', {
-      method: 'POST',
-      body: JSON.stringify({ tx })
-    });
-    el.className = 'attack-result fail';
-    el.textContent = `🎭 FAKE SIGNATURE ATTACK\n━━━━━━━━━━━━━━━━━━━━━━━\n${result.message}\n\nOriginal PubKey: ${result.originalPublicKey}\nVerification:    ${result.verificationResult ? '✓ PASS' : '✗ FAIL'}\n\n→ ${result.explanation}`;
-  } catch (e) { el.className = 'attack-result fail'; el.textContent = e.message; }
-}
-
-async function runMultiSig() {
-  const to = document.getElementById('ms-to').value.trim();
-  const amount = parseFloat(document.getElementById('ms-amount').value);
-  const el = document.getElementById('multisig-result');
-
-  const wallets = await api('/wallets');
-  const signers = [];
-
-  wallets.forEach((w, i) => {
-    const cb = document.getElementById(`ms-${i}`);
-    const pw = document.getElementById(`ms-pw-${i}`);
-    if (cb && cb.checked && pw) {
-      signers.push({ address: w.address, password: pw.value });
-    }
-  });
-
-  if (signers.length < 2) { el.className = 'attack-result info'; el.textContent = 'Select at least 2 signers.'; return; }
-
-  const txData = { from: 'multisig_vault', to, amount, note: 'MultiSig TX', txId: 'ms_' + Date.now(), timestamp: Date.now() };
-
-  el.className = 'attack-result info';
-  el.textContent = 'Collecting signatures...';
-
-  const sigs = [];
-  for (const signer of signers.slice(0, 3)) {
-    try {
-      const result = await api('/multisig/sign', {
-        method: 'POST',
-        body: JSON.stringify({ txData, signerAddress: signer.address, password: signer.password })
-      });
-      sigs.push({ signer: signer.address, sig: result.signature });
-    } catch (e) {
-      sigs.push({ signer: signer.address, error: e.message });
-    }
-  }
-
-  const valid = sigs.filter(s => !s.error);
-  const required = 2;
-  const approved = valid.length >= required;
-
-  el.className = 'attack-result ' + (approved ? 'success' : 'fail');
-  el.textContent = `🔏 MULTI-SIGNATURE (${required}/3)\n━━━━━━━━━━━━━━━━━━━━━━━━━\n${sigs.map((s, i) =>
-    `Signer ${i + 1} [${fmt(s.signer)}]: ${s.error ? '✗ ' + s.error : '✓ Signed'}`
-  ).join('\n')}\n\nValid signatures: ${valid.length}/${required} required\nTransaction: ${approved ? '✓ APPROVED' : '✗ REJECTED (insufficient signatures)'}\n\n→ Requires ${required} of ${signers.length} keys to approve.`;
-}
-
-// ── REFRESH ──────────────────────────────────────────────
-async function refreshAll() {
-  try {
-    allWallets = await api('/wallets');
-    renderSidebar();
-    if (activeWallet) {
-      activeWallet = allWallets.find(w => w.address === activeWallet.address) || activeWallet;
-      renderQuickWallets();
-      refreshBalance();
-    }
-    updatePendingBadge();
-  } catch (e) {}
-}
-
-async function updatePendingBadge() {
-  try {
-    const data = await api('/transactions/pending');
-    document.getElementById('pending-badge').textContent = data.length;
-  } catch (e) {}
-}
-
-// ── SSE REAL-TIME ────────────────────────────────────────
-function connectSSE() {
-  const es = new EventSource('http://localhost:3000/api/events');
-  es.addEventListener('block', (e) => {
-    const block = JSON.parse(e.data);
-    toast(`⛏ Block #${block.index} confirmed! ${block.transactions.length} tx(s)`, 'success');
-    refreshAll();
-
-    const activeTab = document.querySelector('.tab.active')?.dataset.tab;
-    if (activeTab === 'pending') loadPending();
-    if (activeTab === 'blockchain') loadBlockchain();
-    if (activeTab === 'history') loadHistory();
-    document.getElementById('block-counter').textContent = `Block #${block.index}`;
-  });
-  es.onerror = () => setTimeout(connectSSE, 5000);
-}
+// // ── REFRESH ──────────────────────────────────────────────
+// async function refreshAll() {
+//   try {
+//     allWallets = await api('/wallets');
+//     renderSidebar();
+//     if (activeWallet) {
+//       activeWallet = allWallets.find(w => w.address === activeWallet.address) || activeWallet;
+//       renderQuickWallets();
+//       refreshBalance();
+//     }
+//   } catch (e) {}
+// }
 
 // ── INIT ─────────────────────────────────────────────────
 async function init() {
-  await refreshAll();
-  if (allWallets.length > 0) selectWallet(allWallets[0].address);
-  connectSSE();
+  // await refreshAll();
+  // if (allWallets.length > 0) selectWallet(allWallets[0].address);
+  try {
+    const exists = await hasWallet();
+
+    if (exists) {
+      showUnlockScreen();
+    } else {
+      showCreateWalletScreen();
+    }
+
+  } catch (err) {
+    console.error(err);
+    showCreateWalletScreen();
+  }
 }
 
 init();
