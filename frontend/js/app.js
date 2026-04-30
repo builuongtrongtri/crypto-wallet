@@ -1,5 +1,10 @@
+const provider = new ethers.JsonRpcProvider(
+  "https://ethereum-sepolia-rpc.publicnode.com"
+);
+
 const API = 'http://localhost:3000/api';
 let activeWallet = null;
+let walletBalance = 0;
 let allWallets = [];
 let lastTxRef = null;
 
@@ -334,6 +339,7 @@ async function refreshBalance() {
   if (!activeWallet) return;
   try {
     const data = await api(`/wallet/${activeWallet.address}/eth-balance`);
+    walletBalance = data.balance;
     const marketData = await api('/tokens/market');
     const ethPriceUSD = marketData.ethereum.priceUSD;
 
@@ -378,32 +384,138 @@ function renderQuickWallets() {
 }
 
 // ── SEND TRANSACTION ─────────────────────────────────────
-async function sendTransaction() {
+let pendingTx = null;
+
+function isValidAddress(address) {
+  return ethers.isAddress(address);
+}
+
+function isValidAmount(amount) {
+  if (!amount) return false;
+  if (!/^\d*\.?\d+$/.test(amount)) return false;
+
+  try {
+    return ethers.parseEther(amount) > 0n;
+  } catch {
+    return false;
+  }
+}
+
+const toInput = document.getElementById('send-to');
+const amountInput = document.getElementById('send-amount');
+const errEl = document.getElementById('send-error');
+
+toInput.addEventListener('input', validateForm);
+amountInput.addEventListener('input', validateForm);
+
+function validateForm() {
+  const to = toInput.value.trim();
+  const amount = amountInput.value;
+
+  if (!to) {
+    errEl.textContent = 'Recipient address required';
+    return false;
+  }
+
+  if (!ethers.isAddress(to)) {
+    errEl.textContent = 'Invalid address';
+    return false;
+  }
+
+  if (!amount) {
+    errEl.textContent = 'Amount required';
+    return false;
+  }
+
+  if (amount >= walletBalance) {
+    errEl.textContent = 'Insufficient balance';
+    return false;
+  }
+
+  try {
+    if (ethers.parseEther(amount) <= 0n) {
+      errEl.textContent = 'Invalid amount';
+      return false;
+    }
+  } catch {
+    errEl.textContent = 'Invalid amount';
+    return false;
+  }
+
+  errEl.textContent = '';
+  return true;
+}
+
+async function prepareSendReview() {
+  if (!validateForm()) return;
   const to = document.getElementById('send-to').value.trim();
   const amount = parseFloat(document.getElementById('send-amount').value);
-  const password = document.getElementById('send-password').value;
-  const note = document.getElementById('send-note').value;
-  const errEl = document.getElementById('send-error');
-  errEl.textContent = '';
 
-  if (!to) { errEl.textContent = 'Recipient address required'; return; }
-  if (!amount || amount <= 0) { errEl.textContent = 'Invalid amount'; return; }
-  if (!password) { errEl.textContent = 'Password required'; return; }
+  pendingTx = { to, amount };
+
+  document.querySelector('.send-form').classList.add('hidden');
+  document.getElementById('send-review').style.display = 'block';
+  document.getElementById('review-from').textContent = activeWallet.address;
+  document.getElementById('review-to').textContent = to;
+  document.getElementById('review-amount').textContent = `${amount.toFixed(4)} ETH`;
+
+  try {
+    const data = await api('/transaction/gas-fee', {
+      method: 'POST',
+      body: JSON.stringify({ from: activeWallet.address, to, amount })
+    });
+
+    document.getElementById('review-fee').textContent = `${data.fee} ETH`;
+  } catch (e) {
+    document.getElementById('review-fee').textContent = 'Error fetching fee';
+  }
+}
+
+function backToSendForm() {
+  document.getElementById('send-review').style.display = 'none';
+  document.getElementById('send-error').textContent = '';
+  document.querySelector('.send-form').classList.remove('hidden');
+}
+
+async function sendTransaction() {
+  const to = document.getElementById('review-to').textContent.trim();
+  const amount = document.getElementById('review-amount').textContent.replace("ETH", "").trim();
+
+  const nonce = await provider.getTransactionCount(activeWallet.address);
+  const feeData = await provider.getFeeData();
+  const gasLimit = await provider.estimateGas({
+    from: activeWallet.address,
+    to,
+    value: ethers.parseEther(amount)
+  });
+
+  const tx = {
+    to,
+    value: ethers.parseEther(amount),
+    nonce,
+    gasLimit,
+    maxFeePerGas: feeData.maxFeePerGas,
+    maxPriorityFeePerGas: feeData.maxPriorityFeePerGas,
+    chainId: 11155111 // Sepolia
+  };
+
+  const signedTx = await activeWallet.signTransaction(tx);
 
   try {
     const data = await api('/transaction/send', {
       method: 'POST',
-      body: JSON.stringify({ from: activeWallet.address, to, amount, password, note })
+      body: JSON.stringify({ signedTx })
     });
-    lastTxRef = data.tx;
-    toast(`Transaction broadcast! ID: ${data.txId.slice(0, 20)}...`, 'success');
+
+    result = data.result;
+    console.log('Transaction broadcasted:', result);
+    toast(`Transaction broadcast! ID: ${result.hash.slice(0, 20)}...`, 'success');
     document.getElementById('send-to').value = '';
     document.getElementById('send-amount').value = '';
-    document.getElementById('send-password').value = '';
-    document.getElementById('send-note').value = '';
-    await refreshAll();
-    loadPending();
-    updatePendingBadge();
+    pendingTx = null;
+    // backToSendForm();
+    // await refreshAll();
+
   } catch (e) {
     errEl.textContent = e.message;
     toast(e.message, 'error');
@@ -421,7 +533,9 @@ async function loadHistory() {
       return;
     }
     el.innerHTML = data.transactions.map(tx => renderTxItem(tx, activeWallet.address, 'confirmed')).join('');
-  } catch (e) { el.innerHTML = '<div style="color:var(--red)">Error loading history</div>'; }
+  } catch (e) { 
+    el.innerHTML = '<div style="color:var(--red)">Error loading history</div>'; 
+  }
 }
 
 // ── LOAD TOKENS ──────────────────────────────────────────
@@ -497,7 +611,7 @@ function renderTokenItem(token) {
 
 
 function renderTxItem(tx, myAddress, status) {
-  const isOut = tx.from === myAddress;
+  const isOut = tx.type === 'out';
   const dir = isOut ? 'out' : 'in';
   const icon = isOut ? '↑' : '↓';
   const txJson = JSON.stringify(tx).replace(/"/g, '&quot;');
@@ -508,10 +622,9 @@ function renderTxItem(tx, myAddress, status) {
       <div class="tx-info">
         <div class="tx-parties">${fmt(tx.from)} → ${fmt(tx.to)}</div>
         <div class="tx-time">${fmtTime(tx.timestamp)}</div>
-        ${tx.note ? `<div style="font-size:11px;color:var(--text3);margin-top:2px">${tx.note}</div>` : ''}
       </div>
       <div class="tx-amount">
-        <div class="tx-amount-val ${dir}">${fmtAmt(tx.amount, dir)} CVT</div>
+        <div class="tx-amount-val ${dir}">${fmtAmt(tx.amount, dir)} ETH</div>
         <div class="tx-status confirmed">CONFIRMED</div>
       </div>
     </div>
@@ -519,18 +632,15 @@ function renderTxItem(tx, myAddress, status) {
 }
 
 function showTxDetail(tx) {
-  lastTxRef = tx;
-  const sigStr = tx.signature ? `r: ${tx.signature.r}\ns: ${tx.signature.s}` : 'N/A';
   document.getElementById('tx-detail-content').innerHTML = `
-    <div class="detail-row"><div class="detail-label">TX ID</div><div class="detail-val">${tx.txId}</div></div>
+    <div class="detail-row"><div class="detail-label">Hash (SHA-256)</div><div class="detail-val">${tx.hash || '—'}</div></div>
     <div class="detail-row"><div class="detail-label">From</div><div class="detail-val">${tx.from}</div></div>
     <div class="detail-row"><div class="detail-label">To</div><div class="detail-val">${tx.to}</div></div>
-    <div class="detail-row"><div class="detail-label">Amount</div><div class="detail-val">${tx.amount} CVT</div></div>
-    <div class="detail-row"><div class="detail-label">Note</div><div class="detail-val">${tx.note || '—'}</div></div>
+    <div class="detail-row"><div class="detail-label">Amount</div><div class="detail-val">${tx.amount} ETH</div></div>
+    <div class="detail-row"><div class="detail-label">Status</div><div class="detail-val">${tx.status}</div></div>
     <div class="detail-row"><div class="detail-label">Timestamp</div><div class="detail-val">${fmtTime(tx.timestamp)}</div></div>
-    <div class="detail-row"><div class="detail-label">Hash (SHA-256)</div><div class="detail-val">${tx.hash || '—'}</div></div>
-    <div class="detail-row"><div class="detail-label">ECDSA Signature</div><div class="detail-val">${sigStr}</div></div>
-    <div class="detail-row"><div class="detail-label">Public Key</div><div class="detail-val">${tx.publicKey || '—'}</div></div>
+    <div class="detail-row"><div class="detail-label">Total gas fee</div><div class="detail-val">${tx.gasFee} ETH</div></div>
+    <div class="detail-row"><div class="detail-label">Total</div><div class="detail-val">${parseFloat(tx.amount) + parseFloat(tx.gasFee)} ETH</div></div>
     <div style="margin-top:8px">
       <button class="btn-primary" style="font-size:13px;padding:8px 16px" onclick="closeAllModals();openModal('export-wallet-modal')">Export Private Key</button>
     </div>

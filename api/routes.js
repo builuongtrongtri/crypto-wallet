@@ -1,11 +1,13 @@
 const express = require('express');
 const router = express.Router();
 const { createWallet, getEthBalance } = require('../ethereum/wallet');
-const { sendETH } = require('../ethereum/transaction');
+const { broadcastTransaction } = require('../ethereum/transaction');
 const { provider } = require('../ethereum/provider');
+const { ethers } = require('ethers');
 const { encryptMnemonic, decryptMnemonic } = require('../core/crypto');
 const crypto = require('crypto');
 const { getMarketData } = require('../ethereum/token');
+const { getTransactions, getGasFeeTransaction } = require('../ethereum/scanner');
 
 // ── TOKENS ──────────────────────────────────────────────
 router.get('/tokens/market', async (req, res) => {
@@ -215,34 +217,48 @@ router.get('/wallet/:address/eth-balance', async (req, res) => {
 
 
 // ── TRANSACTIONS ────────────────────────────────────────
+router.post('/transaction/gas-fee', async (req, res) => {
+  try {
+    const { from, to, amount } = req.body;
+
+    const feeData = await provider.getFeeData();
+
+    const gasPrice = feeData.maxFeePerGas || feeData.gasPrice;
+
+    if (!gasPrice) {
+      throw new Error("Gas price not available");
+    }
+
+    const gasLimit = await provider.estimateGas({
+      from,
+      to,
+      value: ethers.parseEther(String(amount))
+    });
+
+    const fee = gasLimit * gasPrice;
+
+    res.json({
+      fee: ethers.formatEther(fee),
+      gasLimit: gasLimit.toString()
+    });
+
+  } catch (e) {
+    console.error("GAS FEE ERROR:", e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 router.post('/transaction/send', async (req, res) => {
   try {
-    const { from, to, amount, password } = req.body;
-    if (!from || !to || !amount || !password) {
-      return res.status(400).json({ error: 'Missing fields: from, to, amount, password' });
+    const { signedTx } = req.body;
+    if (!signedTx) {
+      return res.status(400).json({ error: 'Missing field: signedTx' });
     }
-
-    // Get wallet from database
-    const walletDoc = await Wallet.findOne({ address: from });
-    if (!walletDoc) return res.status(404).json({ error: 'Wallet not found' });
-    if (!walletDoc.encryptedPrivateKey) {
-      return res.status(400).json({ error: 'Private key not available for this wallet' });
-    }
-
-    // Decrypt private key
-    const key = crypto.scryptSync(password, "salt", 32);
-    const decipher = crypto.createDecipheriv("aes-256-cbc", key, Buffer.from(walletDoc.iv, "hex"));
-    let privateKey = decipher.update(walletDoc.encryptedPrivateKey, "hex", "utf8");
-    privateKey += decipher.final("utf8");
 
     // Send transaction via ethers.js
-    const result = await sendETH(privateKey, to, amount);
+    const result = await broadcastTransaction(signedTx);
     res.json({ 
-      txHash: result.hash,
-      from: from,
-      to: to,
-      amount: amount,
-      network: 'Sepolia Testnet'
+      result: result,
     });
   } catch (e) {
     res.status(400).json({ error: e.message });
@@ -251,22 +267,34 @@ router.post('/transaction/send', async (req, res) => {
 
 router.get('/transaction/history/:address', async (req, res) => {
   try {
-    const transactions = await provider.getHistory(req.params.address);
-    const txList = await Promise.all(transactions.map(async (tx) => {
-      const receipt = await provider.getTransactionReceipt(tx.hash);
-      return {
-        hash: tx.hash,
-        from: tx.from,
-        to: tx.to,
-        value: ethers.formatEther(tx.value),
-        gasPrice: ethers.formatUnits(tx.gasPrice, 'gwei'),
-        blockNumber: receipt?.blockNumber,
-        status: receipt?.status === 1 ? 'success' : 'failed'
-      };
-    }));
-    res.json({ address: req.params.address, transactions: txList });
+    const address = req.params.address;
+    const transactions = await getTransactions(address);
+
+    const txList = await Promise.all(
+      transactions.map(async (tx) => {
+        const receipt = await getGasFeeTransaction(tx.hash);
+        const gasUsed = BigInt(receipt.gasUsed);
+        const gasPrice = BigInt(receipt.effectiveGasPrice || receipt.gasPrice);
+        const totalFee = gasUsed * gasPrice;
+
+        return {
+          hash: tx.hash,
+          from: tx.from,
+          to: tx.to,
+          amount: tx.value.toString(),
+          type: tx.from.toLowerCase() === address.toLowerCase() ? "out" : "in",
+          status: "success",
+          timestamp: tx.metadata?.blockTimestamp
+            ? new Date(tx.metadata.blockTimestamp).getTime()
+            : Date.now(),
+          gasFee: ethers.formatEther(totalFee)
+        };
+      }));
+      
+    res.json({ address: address, transactions: txList });
   } catch (e) {
-    res.status(400).json({ error: e.message });
+    console.error("HISTORY ERROR:", e);
+    res.status(500).json({ error: e.message });
   }
 });
 

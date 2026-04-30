@@ -396,6 +396,47 @@ html, body { height: 100%; background: var(--bg); color: var(--text); font-famil
   margin-bottom: 10px;
 }
 #quick-wallet-list { display: flex; flex-direction: column; gap: 6px; }
+
+.send-review {
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 28px;
+  max-width: 560px;
+  margin-bottom: 24px;
+}
+.send-review h2 {
+  font-size: 20px;
+  font-weight: 800;
+  margin-bottom: 20px;
+  color: var(--text);
+}
+.review-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 14px;
+  padding: 12px 14px;
+  background: var(--bg3);
+  border-radius: 12px;
+}
+.review-label {
+  color: var(--text3);
+  font-size: 13px;
+  min-width: 110px;
+}
+.review-value {
+  color: var(--text);
+  font-size: 14px;
+  text-align: right;
+}
+.review-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  margin-top: 20px;
+}
+.hidden { display: none !important; }
 .quick-wallet-btn {
   display: flex;
   justify-content: space-between;

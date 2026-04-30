@@ -26,9 +26,8 @@
     <div class="sidebar-bottom">
       <div class="chain-status">
         <span class="dot" id="chain-dot"></span>
-        <span id="chain-label">SimNet v1</span>
+        <span id="chain-label">Sepolia Testnet</span>
       </div>
-      <div id="block-counter" class="block-counter">Block #0</div>
     </div>
   </aside>
 
@@ -47,6 +46,7 @@
           <input style="padding: 12px 18px;" type="password" id="password" placeholder="Enter your password">
         </div>
         <button class="btn-primary" onclick="unlockWallet()">Unlock</button>
+        <p style="margin-top: 5px; font-size: 12px;"><a href="#">Forgot password?</a></p>
       </div>
     </div>
 
@@ -98,28 +98,40 @@
             <label>Amount</label>
             <div class="amount-row">
               <input type="number" id="send-amount" placeholder="0.0" min="0.0001" step="0.0001">
-              <span class="coin-label">CVT</span>
+              <span class="coin-label">ETH</span>
             </div>
           </div>
-          <div class="form-group">
+          <!-- <div class="form-group">
             <label>Note (optional)</label>
             <input type="text" id="send-note" placeholder="Payment for...">
           </div>
           <div class="form-group">
             <label>Wallet Password</label>
             <input type="password" id="send-password" placeholder="••••••••">
-          </div>
+          </div> -->
           <div id="send-error" class="error-msg"></div>
-          <button class="btn-primary btn-send" onclick="sendTransaction()">
-            <span>Sign & Broadcast</span>
+          <button class="btn-primary btn-send" onclick="prepareSendReview()">
+            <span>Continue</span>
             <span class="btn-icon">→</span>
           </button>
         </div>
 
-        <div class="quick-wallets" id="quick-wallets">
+        <div id="send-review" class="send-review" style="display:none">
+          <h2>Review Transaction</h2>
+          <div class="review-row"><span class="review-label">From</span><span id="review-from" class="review-value monospace">—</span></div>
+          <div class="review-row"><span class="review-label">To</span><span id="review-to" class="review-value monospace">—</span></div>
+          <div class="review-row"><span class="review-label">Amount</span><span id="review-amount" class="review-value">—</span></div>
+          <div class="review-row"><span class="review-label">Network</span><span id="review-network" class="review-value">Sepolia</span></div>
+          <div class="review-row"><span class="review-label">Network fee</span><span id="review-fee" class="review-value">—</span></div>          <div class="review-actions">
+            <button class="btn-ghost" onclick="backToSendForm()">Cancel</button>
+            <button class="btn-primary" onclick="sendTransaction()">Confirm</button>
+          </div>
+        </div>
+
+        <!-- <div class="quick-wallets" id="quick-wallets">
           <div class="section-label">Quick Send To</div>
           <div id="quick-wallet-list"></div>
-        </div>
+        </div> -->
       </div>
 
       <!-- HISTORY TAB -->

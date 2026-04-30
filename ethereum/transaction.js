@@ -2,25 +2,9 @@ const { ethers } = require('ethers');
 const { getWallet } = require('./wallet');
 const { provider } = require('./provider');
 
-async function sendTx(wallet, to, amount) {
-  const tx = await wallet.sendTransaction({
-    to,
-    value: ethers.parseEther(amount)
-  });
-
-  // Wait for 1 confirmation
-  const receipt = await tx.wait(1);
-
-  return {
-    hash: tx.hash,
-    from: tx.from,
-    to: tx.to,
-    value: ethers.formatEther(tx.value),
-    blockNumber: receipt?.blockNumber,
-    transactionIndex: receipt?.transactionIndex,
-    gasUsed: receipt?.gasUsed?.toString(),
-    status: receipt?.status === 1 ? 'success' : 'failed'
-  };
+async function broadcastTransaction(signedTx) {
+  const tx = await provider.broadcastTransaction(signedTx);
+  return tx
 }
 
 async function getTransactionStatus(txHash) {
@@ -47,7 +31,7 @@ async function getGasPrice() {
 }
 
 module.exports = {
-  sendTx,
+  broadcastTransaction,
   getTransactionStatus,
   getGasPrice
 };
