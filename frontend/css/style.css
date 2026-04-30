@@ -212,7 +212,7 @@ html, body { height: 100%; background: var(--bg); color: var(--text); font-famil
 .wallet-label { font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: var(--text3); margin-bottom: 8px; }
 .wallet-address-row { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
 #hdr-address { font-family: var(--mono); font-size: 13px; color: var(--text); }
-.pubkey-row { font-family: var(--mono); font-size: 10px; color: var(--text3); word-break: break-all; max-width: 360px; }
+.pubkey-row { font-family: var(--mono); font-size: 10px; color: var(--text3); word-break: break-all; max-width: 500px; }
 
 .copy-btn {
   background: var(--bg3);
@@ -811,6 +811,22 @@ html, body { height: 100%; background: var(--bg); color: var(--text); font-famil
 .mnemonic-input-cell:focus-within {
   border-color: var(--accent);
 }
+
+.mnemonic-paste-area {
+  margin-top: 8px;
+  margin-right: 6px;
+  text-align: end;
+}
+
+.paste-mnemonic {
+  margin-top: 12px;
+  font-size: 13px;
+  color: var(--accent);
+  cursor: pointer;
+  margin-left: auto;
+}
+
+.paste-mnemonic:hover { text-decoration: underline; }
 
 /* ── WORD COUNT SELECTOR ─────────────────────────────────── */
 .word-count-selector {

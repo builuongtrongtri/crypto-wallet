@@ -10,6 +10,18 @@ function createWallet() {
   };
 }
 
+function importWalletFromMnemonic(mnemonic, derivationPath = "m/44'/60'/0'/0/0") {
+  const wallet = ethers.HDNodeWallet.fromPhrase(
+    mnemonic, 
+    null, 
+    derivationPath
+  );
+
+  return {
+    address: wallet.address
+  };
+}
+
 // function getWallet(privateKey) {
 //   return new ethers.Wallet(privateKey, provider);
 // }
@@ -30,4 +42,5 @@ async function getEthBalance(address) {
 module.exports = {
   createWallet,
   getEthBalance,
+  importWalletFromMnemonic
 };

@@ -47,17 +47,47 @@ function showCreateWalletScreen() {
 function openModal(id) {
   document.getElementById('modal-overlay').classList.add('active');
   document.getElementById(id).classList.add('active');
+  
+  // Initialize mnemonic input grid when import modal is opened
+  if (id === 'import-wallet-modal') {
+    buildMnemonicInputGrid(12);
+  }
 }
 function closeAllModals() {
   document.getElementById('modal-overlay').classList.remove('active');
   document.querySelectorAll('.modal').forEach(m => m.classList.remove('active'));
   document.querySelectorAll('.error-msg').forEach(e => e.textContent = '');
 
+}
+
+function createWalletModal() {
+  closeAllModals();
   document.getElementById('create-password').value = '';
   document.getElementById('confirm-password').value = '';
 
   document.getElementById('mnemonic-grid').innerHTML = '';
   document.getElementById('mnemonic-meta').textContent = '';
+}
+
+function closeBackupModal() {
+  closeAllModals();
+  document.getElementById('backup-password').value = '';
+  document.getElementById('backup-mnemonic-grid').innerHTML = ''
+  document.getElementById('backup-meta').innerHTML = '';
+  document.getElementById('backup-mnemonic-result').style.display = 'none';
+  document.querySelector('#backup-modal > div.form-group').style.display = 'block';
+  document.querySelector('#backup-modal > button.btn-primary').style.display = 'block';
+  document.querySelector('#backup-error').style.display = 'block';
+}
+
+function closeExportModal() {
+  closeAllModals();
+  document.getElementById('export-password').value = '';
+  document.getElementById('export-result').style.display = 'none';
+  document.getElementById('export-error').textContent = '';
+  document.querySelector('#export-wallet-modal > div.form-group').style.display = 'block';
+  document.querySelector('#export-wallet-modal > button.btn-primary').style.display = 'block';
+  document.querySelector('#export-error').style.display = 'block';
 }
 
 // ── TABS ────────────────────────────────────────────────
@@ -98,7 +128,7 @@ async function createWallet() {
       method: 'POST',
       body: JSON.stringify({ password: pw })
     });
-    closeAllModals();
+    createWalletModal();
     // await refreshAll();
     // selectWallet(data.address);
 
@@ -111,7 +141,9 @@ async function createWallet() {
       salt: data.vault.salt,
       authTag: data.vault.authTag
     });
-    activeWallet = { address: data.address };
+    activeWallet = ethers.Wallet.fromPhrase(data.mnemonic);
+    saveSession(activeWallet);
+
     showWallet(data.address);
     toast(`Wallet created!`, 'success');
   } catch (e) {
@@ -142,20 +174,33 @@ async function unlockWallet() {
       }) 
     });
     activeWallet = ethers.Wallet.fromPhrase(data.mnemonic);
+    saveSession(activeWallet);
+
     showWallet(activeWallet);
     toast('Wallet unlocked!', 'success');
+    document.getElementById('password').value = '';
   } catch (e) {
     toast(e.message, 'error');
   }
 }
 
+// Lock wallet
+document.getElementById('lockWallet-btn')
+  .addEventListener('click', () => {
+    clearSession();
+    activeWallet = null;
+    document.getElementById('wallet-screen').style.display = 'none';
+    document.getElementById('no-wallet-screen').style.display = 'flex';
+    toast('Wallet locked', 'info');
+  });
+
+
 function showWallet(wallet) {
   document.getElementById('no-wallet-screen').style.display = 'none';
   document.getElementById('wallet-screen').style.display = 'block';
 
-  document.getElementById('hdr-address').textContent = wallet.address;
-  document.getElementById('hdr-pubkey').textContent = wallet.publicKey
-    ? wallet.publicKey.slice(0, 40) + '...' : '';
+  document.getElementById('hdr-address').textContent = `Address: ${wallet.address}`;
+  document.getElementById('hdr-pubkey').textContent = `Public key: ${wallet.publicKey}`;
 
   refreshBalance();
   loadTokens();
@@ -227,7 +272,7 @@ async function importFromMnemonic() {
   const words = Array.from(inputs).map(i => i.value.trim().toLowerCase()).filter(Boolean);
   const mnemonic = words.join(' ');
   const password = document.getElementById('import-mnemonic-password').value;
-  const index = parseInt(document.getElementById('import-mnemonic-index').value) || 0;
+  // const index = parseInt(document.getElementById('import-mnemonic-index').value) || 0;
   const errEl = document.getElementById('import-mnemonic-error');
   errEl.textContent = '';
 
@@ -239,14 +284,25 @@ async function importFromMnemonic() {
   try {
     const data = await api('/wallet/import/mnemonic', {
       method: 'POST',
-      body: JSON.stringify({ mnemonic, password, index })
+      body: JSON.stringify({ mnemonic: mnemonic, password: password })
     });
+
+    await saveWallet({
+      address: data.address,
+      encryptedMnemonic: data.vault.encryptedMnemonic,
+      iv: data.vault.iv,
+      salt: data.vault.salt,
+      authTag: data.vault.authTag
+    });
+    activeWallet = ethers.Wallet.fromPhrase(mnemonic);
+
+    console.log('Imported wallet:', activeWallet.address);
+    saveSession(activeWallet);
     closeAllModals();
-    toast(`Wallet imported: ${fmt(data.address)}`, 'success');
-    await refreshAll();
-    selectWallet(data.address);
+    showWallet(data.address);
+    toast(`Wallet imported!`, 'success');
   } catch (e) {
-    errEl.textContent = e.message;
+    errEl.textContent = "Invalid mnemonic or error importing wallet";
   }
 }
 
@@ -268,18 +324,43 @@ async function importWallet() {
   }
 }
 
+function pasteMnemonic() {
+  const imputs = document.querySelectorAll('.mnemonic-input-cell input');
+  navigator.clipboard.readText().then(text => {
+    const words = text.trim().split(/\s+/);
+    words.forEach((w, i) => {
+      const inp = imputs[i];
+      if (inp) inp.value = w;
+    });
+  });
+}
+
 // ── REVEAL MNEMONIC ───────────────────────────────────────
 async function revealMnemonic() {
   const pw = document.getElementById('backup-password').value;
-  const address = activeWallet?.address;
   const errEl = document.getElementById('backup-error');
   errEl.textContent = '';
-
+  if (!pw) {
+    toast('Password required', 'error');
+    return;
+  }
   try {
-    const data = await api('/wallet/mnemonic', {
-      method: 'POST',
-      body: JSON.stringify({ address, password: pw })
+    const walletData = await getWallet();
+    if (!walletData) {
+      toast('No wallet found', 'error');
+      return;
+    }
+
+    const data = await api('/wallet/unlock', { 
+      method: 'POST', 
+      body: JSON.stringify({ 
+        password: pw,
+        vault: walletData
+      }) 
     });
+
+    toast('Mnemonic revealed! Handle with care.', 'success');
+
     const words = data.mnemonic.trim().split(/\s+/);
     const grid = document.getElementById('backup-mnemonic-grid');
     grid.innerHTML = words.map((w, i) => `
@@ -290,21 +371,47 @@ async function revealMnemonic() {
     `).join('');
     document.getElementById('backup-meta').innerHTML =
       `BIP-39 · ${words.length} words · Path: m/44'/60'/0'/0/0`;
-    document.getElementById('backup-mnemonic-result').style.display = 'block';
+    document.getElementById('backup-mnemonic-result').style.display = 'block'
+    document.querySelector('#backup-modal > div.form-group').style.display = 'none';
+    document.querySelector('#backup-modal > button.btn-primary').style.display = 'none';
+    document.querySelector('#backup-error').style.display = 'none';
+
   } catch (e) {
-    errEl.textContent = e.message;
+    toast(e.message, 'error');
   }
 }
 
-async function doExport() {
+async function revealPrivateKey() {
   const pw = document.getElementById('export-password').value;
-  const address = activeWallet?.address;
+
+  if (!pw) {
+    toast('Password required', 'error');
+    return;
+  }
   try {
-    const data = await api('/wallet/export', { method: 'POST', body: JSON.stringify({ address, password: pw }) });
+    const walletData = await getWallet();
+    if (!walletData) {
+      toast('No wallet found', 'error');
+      return;
+    }
+
+    const data = await api('/wallet/unlock', { 
+      method: 'POST', 
+      body: JSON.stringify({ 
+        password: pw,
+        vault: walletData
+      }) 
+    });
+    toast('Private key revealed! Handle with care.', 'success');
+    const privateKey = activeWallet.privateKey;
     const el = document.getElementById('export-result');
     el.style.display = 'block';
-    el.textContent = data.privateKey;
+    el.textContent = privateKey;
     document.getElementById('export-error').textContent = '';
+
+    document.querySelector('#export-wallet-modal > div.form-group').style.display = 'none';
+    document.querySelector('#export-wallet-modal > button.btn-primary').style.display = 'none';
+    document.querySelector('#export-error').style.display = 'none';
   } catch (e) {
     document.getElementById('export-error').textContent = e.message;
   }
@@ -513,7 +620,7 @@ async function sendTransaction() {
     document.getElementById('send-to').value = '';
     document.getElementById('send-amount').value = '';
     pendingTx = null;
-    // backToSendForm();
+    document.querySelector(".tab[data-tab=\"history\"]").click();
     // await refreshAll();
 
   } catch (e) {
@@ -598,7 +705,7 @@ function renderTokenItem(token) {
       <div class="token-icon">${token.icon}</div>
       <div class="token-info">
         <div class="token-name">${token.name}${badgeHtml}</div>
-        <div class="token-change ${changeClass}">${changeSign}${Math.abs(token.change24h).toFixed(2)}%</div>
+        <div class="token-change ${changeClass}">${changeSign} ${Math.abs(token.change24h).toFixed(2)}%</div>
       </div>
       <div class="token-stats">
         <div class="token-price">$${token.price.toFixed(2)}</div>
@@ -642,7 +749,7 @@ function showTxDetail(tx) {
     <div class="detail-row"><div class="detail-label">Total gas fee</div><div class="detail-val">${tx.gasFee} ETH</div></div>
     <div class="detail-row"><div class="detail-label">Total</div><div class="detail-val">${parseFloat(tx.amount) + parseFloat(tx.gasFee)} ETH</div></div>
     <div style="margin-top:8px">
-      <button class="btn-primary" style="font-size:13px;padding:8px 16px" onclick="closeAllModals();openModal('export-wallet-modal')">Export Private Key</button>
+      <button class="btn-primary" style="font-size:13px;padding:8px 16px" onclick="window.open('https://sepolia.etherscan.io/tx/${tx.hash}', '_blank')">View on block explorer</button>
     </div>
   `;
   openModal('tx-detail-modal');
@@ -663,15 +770,23 @@ function showTxDetail(tx) {
 
 // ── INIT ─────────────────────────────────────────────────
 async function init() {
-  // await refreshAll();
-  // if (allWallets.length > 0) selectWallet(allWallets[0].address);
   try {
     const exists = await hasWallet();
 
-    if (exists) {
-      showUnlockScreen();
-    } else {
+    if (!exists) {
       showCreateWalletScreen();
+      return;
+    }
+
+    const session = loadSession();
+
+    if (session?.mnemonic) {
+      activeWallet = ethers.Wallet.fromPhrase(session.mnemonic);
+
+      showWallet(activeWallet);
+      toast('Wallet unlocked!', 'success');
+    } else {
+      showUnlockScreen();
     }
 
   } catch (err) {

@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const { createWallet, getEthBalance } = require('../ethereum/wallet');
+const { createWallet, getEthBalance, importWalletFromMnemonic } = require('../ethereum/wallet');
 const { broadcastTransaction } = require('../ethereum/transaction');
 const { provider } = require('../ethereum/provider');
 const { ethers } = require('ethers');
@@ -71,37 +71,24 @@ router.post('/wallet/unlock', async (req, res) => {
 router.post('/wallet/import/mnemonic', async (req, res) => {
   try {
     const { mnemonic, password } = req.body;
-    if (!mnemonic) return res.status(400).json({ error: 'Mnemonic required' });
-    
+
     // Use ethers.js to create wallet from mnemonic
-    const wallet = ethers.Wallet.fromMnemonic(
-      ethers.Mnemonic.fromPhrase(mnemonic),
-      "m/44'/60'/0'/0/0" // Standard Ethereum derivation path
-    );
+    const { address } = importWalletFromMnemonic(mnemonic);
 
-    const address = wallet.address;
-    const key = crypto.scryptSync(password, "salt", 32);
-    const iv = crypto.randomBytes(16);
-
-    const cipher = crypto.createCipheriv("aes-256-cbc", key, iv);
-    let encrypted = cipher.update(mnemonic, "utf8", "hex");
-    encrypted += cipher.final("hex");
-
-    // Encrypt private key as well
-    const cipherPrivate = crypto.createCipheriv("aes-256-cbc", key, iv);
-    let encryptedPrivateKey = cipherPrivate.update(wallet.privateKey, "utf8", "hex");
-    encryptedPrivateKey += cipherPrivate.final("hex");
-
-    await Wallet.create({
-      address: address,
-      encryptedMnemonic: encrypted,
-      encryptedPrivateKey: encryptedPrivateKey,
-      iv: iv.toString("hex")
+    const { encryptedMnemonic, iv, salt, authTag } = await encryptMnemonic(mnemonic, password); 
+    res.json({ 
+      address, 
+      mnemonic, 
+      vault: { 
+        encryptedMnemonic, 
+        iv: iv.toString("hex"), 
+        salt, 
+        authTag 
+      } 
     });
 
-    res.json({ address: address });
   } catch (e) {
-    res.status(400).json({ error: e.message });
+    res.status(500).json({ error: e.message });
   }
 });
 
@@ -157,34 +144,34 @@ router.post('/wallet/mnemonic', async (req, res) => {
   }
 });
 
-router.post('/wallet/export', async (req, res) => {
-  try {
-    const { address, password } = req.body;
-    if (!address || !password) return res.status(400).json({ error: 'Address and password required' });
+// router.post('/wallet/export', async (req, res) => {
+//   try {
+//     const { address, password } = req.body;
+//     if (!address || !password) return res.status(400).json({ error: 'Address and password required' });
     
-    const walletDoc = await Wallet.findOne({ address });
-    if (!walletDoc) return res.status(404).json({ error: 'Wallet not found' });
+//     const walletDoc = await Wallet.findOne({ address });
+//     if (!walletDoc) return res.status(404).json({ error: 'Wallet not found' });
 
-    const key = crypto.scryptSync(password, "salt", 32);
-    const decipher = crypto.createDecipheriv("aes-256-cbc", key, Buffer.from(walletDoc.iv, "hex"));
-    let privateKey = decipher.update(walletDoc.encryptedPrivateKey, "hex", "utf8");
-    privateKey += decipher.final("utf8");
+//     const key = crypto.scryptSync(password, "salt", 32);
+//     const decipher = crypto.createDecipheriv("aes-256-cbc", key, Buffer.from(walletDoc.iv, "hex"));
+//     let privateKey = decipher.update(walletDoc.encryptedPrivateKey, "hex", "utf8");
+//     privateKey += decipher.final("utf8");
 
-    res.json({ 
-      address: address,
-      privateKey: privateKey,
-      ...(walletDoc.encryptedMnemonic && {
-        mnemonic: (() => {
-          const decipher2 = crypto.createDecipheriv("aes-256-cbc", key, Buffer.from(walletDoc.iv, "hex"));
-          let m = decipher2.update(walletDoc.encryptedMnemonic, "hex", "utf8");
-          return m + decipher2.final("utf8");
-        })()
-      })
-    });
-  } catch (e) {
-    res.status(400).json({ error: e.message });
-  }
-});
+//     res.json({ 
+//       address: address,
+//       privateKey: privateKey,
+//       ...(walletDoc.encryptedMnemonic && {
+//         mnemonic: (() => {
+//           const decipher2 = crypto.createDecipheriv("aes-256-cbc", key, Buffer.from(walletDoc.iv, "hex"));
+//           let m = decipher2.update(walletDoc.encryptedMnemonic, "hex", "utf8");
+//           return m + decipher2.final("utf8");
+//         })()
+//       })
+//     });
+//   } catch (e) {
+//     res.status(400).json({ error: e.message });
+//   }
+// });
 
 // router.get('/wallets', async (req, res) => {
 //   try {
