@@ -20,8 +20,8 @@
 
     <div id="wallet-list-sidebar"></div>
 
-    <button class="btn-new-wallet" onclick="openModal('create-wallet-modal')">+ New Wallet</button>
-    <button class="btn-import" onclick="openModal('import-wallet-modal')">↑ Import</button>
+    <button class="btn-new-wallet">Add ccount</button>
+    <button class="btn-import">Add wallet</button>
 
     <div class="sidebar-bottom">
       <div class="chain-status">
@@ -46,7 +46,9 @@
           <input style="padding: 12px 18px;" type="password" id="password" placeholder="Enter your password">
         </div>
         <button class="btn-primary" onclick="unlockWallet()">Unlock</button>
-        <p style="margin-top: 5px; font-size: 12px;"><a href="#">Forgot password?</a></p>
+        <div class="forgot-pasword-area">
+          <a id="forgot-password" onclick="openModal('forgot-password-modal')">Forgot password?</a>
+        </div>
       </div>
     </div>
 
@@ -78,10 +80,12 @@
         <button class="tab active" data-tab="tokens">Tokens</button>
         <button class="tab" data-tab="send">Send</button>
         <button class="tab" data-tab="history">History</button>
+        <button class="tab" data-tab="attack">Attack Demo</button>
       </div>
 
       <!-- TOKEN TAB -->
       <div id="tab-tokens" class="tab-content active">
+        <h2>All Tokens</h2>
         <div id="token-list">
 
         </div>
@@ -140,6 +144,72 @@
         <h2>Transaction History</h2>
         <div id="history-list" class="tx-list"></div>
       </div>
+
+      <!-- ATTACK DEMO TAB -->
+      <div id="tab-attack" class="tab-content">
+        <h2>Attack Demo</h2>
+        <div class="attack-grid">
+          <div class="attack-card" id="attack-replay">
+            <div class="attack-icon">🔨</div>
+            <h3>Replay Attack</h3>
+            <p>Send a transaction with a replayed nonce.</p>
+            <div class="attack-controls">
+              <textarea type="text" id="replay-signed-transaction" placeholder="Signed transaction data"></textarea>
+              <button class="btn-attack" onclick="runReplayAttack()">Run Attack</button>
+            </div>
+            <div id="ra-result" class="attack-result"></div>
+          </div>
+
+          <!-- <div class="attack-card" id="attack-tamper">
+            <div class="attack-icon">🔨</div>
+            <h3>Data Tampering</h3>
+            <p>Modify a transaction amount after signing. Shows hash invalidation.</p>
+            <div class="attack-controls">
+              <select id="tamper-tx-select"><option value="">Select a confirmed tx...</option></select>
+              <input type="number" id="tamper-new-amount" placeholder="New fake amount" step="0.01">
+              <button class="btn-attack" onclick="runTamperAttack()">Run Attack</button>
+            </div>
+            <div id="tamper-result" class="attack-result"></div>
+          </div>
+
+          <div class="attack-card" id="attack-double-spend">
+            <div class="attack-icon">⚡</div>
+            <h3>Double Spending</h3>
+            <p>Send 2 transactions simultaneously exceeding balance. Race condition demo.</p>
+            <div class="attack-controls">
+              <input type="text" id="ds-to" placeholder="Target address (0x...)">
+              <input type="number" id="ds-amount" placeholder="Amount per tx" step="0.1">
+              <input type="password" id="ds-password" placeholder="Wallet password">
+              <button class="btn-attack" onclick="runDoubleSpend()">Send Both</button>
+            </div>
+            <div id="ds-result" class="attack-result"></div>
+          </div>
+
+          <div class="attack-card" id="attack-fake-sig">
+            <div class="attack-icon">🎭</div>
+            <h3>Fake Signature</h3>
+            <p>Verify a transaction whose signature was made with a different private key.</p>
+            <div class="attack-controls">
+              <select id="fake-sig-tx"><option value="">Select a pending/confirmed tx...</option></select>
+              <button class="btn-attack" onclick="runFakeSigAttack()">Simulate</button>
+            </div>
+            <div id="fakesig-result" class="attack-result"></div>
+          </div>
+
+          <div class="attack-card" id="attack-multisig">
+            <div class="attack-icon">🔏</div>
+            <h3>Multi-Signature (2/3)</h3>
+            <p>Collect 2 of 3 signatures to authorize a transaction.</p>
+            <div class="attack-controls">
+              <div id="multisig-wallets"></div>
+              <input type="text" id="ms-to" placeholder="Recipient address">
+              <input type="number" id="ms-amount" placeholder="Amount" step="0.1">
+              <button class="btn-attack" onclick="runMultiSig()">Collect Signatures</button>
+            </div>
+            <div id="multisig-result" class="attack-result"></div> -->
+          </div>
+        </div>
+      </div>
     </div>
   </main>
 </div>
@@ -171,12 +241,26 @@
   <h2>🔐 Your Recovery Phrase</h2>
   <div class="warning-box">⚠️ Write these words down in order. Never share them. This screen won't appear again.</div>
   <div id="mnemonic-grid" class="mnemonic-grid"></div>
+  <div class="mnemonic-copy-area">
+    <a class="copy-mnemonic" onclick="copyMnemonic()">Copy</a>
+  </div>
   <div class="mnemonic-meta" id="mnemonic-meta"></div>
   <div class="mnemonic-confirm-row">
     <input type="checkbox" id="mnemonic-saved-cb">
     <label for="mnemonic-saved-cb">I have written down my recovery phrase securely</label>
   </div>
   <button class="btn-primary" onclick="confirmMnemonicSaved()" style="margin-top:16px;width:100%">Continue →</button>
+</div>
+
+<div id="forgot-password-modal" class="modal">
+  <button class="modal-close" onclick="closeAllModals()">✕</button>
+  <h2>Forgot your password?</h2>
+  <p class="modal-sub">We can’t recover your password for you.</p>
+  <p class="modal-sub">Add your wallet back to MetaMask by entering the Secret Recovery Phrase associated with it.</p>
+  <div class="forgot-actions">
+    <button class="btn-primary" onclick="openModal('import-wallet-modal')">Import Wallet</button>
+    <button style="margin-top:16px" class="btn-ghost">I don't know my Phrase</button>
+  </div>
 </div>
 
 <!-- IMPORT WALLET -->
@@ -191,9 +275,11 @@
 
   <!-- Mnemonic import -->
   <div id="import-tab-mnemonic">
-    <p class="modal-sub" style="margin-bottom:16px">Enter your Secret Recovery Phrase</p>
-    <div id="mnemonic-input-grid" class="mnemonic-input-grid">
-      <!-- filled by JS -->
+    <div class="form-group">
+      <label>Enter your Secret Recovery Phrase</label>
+      <div id="mnemonic-input-grid" class="mnemonic-input-grid">
+        <!-- filled by JS -->
+      </div>
     </div>
     <div class="mnemonic-paste-area">
       <a class="paste-mnemonic" onclick="pasteMnemonic()">Paste</a>
@@ -238,6 +324,9 @@
   <button class="btn-primary" onclick="revealMnemonic()">Reveal Phrase</button>
   <div id="backup-mnemonic-result" style="display:none;margin-top:16px">
     <div id="backup-mnemonic-grid" class="mnemonic-grid"></div>
+    <div class="mnemonic-copy-area">
+      <a class="copy-mnemonic" onclick="copyBackupMnemonic()">Copy</a>
+    </div>
     <div id="backup-meta" class="mnemonic-meta"></div>
   </div>
 </div>

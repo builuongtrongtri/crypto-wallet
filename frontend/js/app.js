@@ -101,6 +101,7 @@ document.querySelectorAll('.tab').forEach(tab => {
     const tabName = tab.dataset.tab;
     if (tabName === 'history') loadHistory();
     if (tabName === 'tokens') loadTokens();
+    if (tabName === 'attack') loadAttack();
   });
 });
 
@@ -191,20 +192,22 @@ document.getElementById('lockWallet-btn')
     activeWallet = null;
     document.getElementById('wallet-screen').style.display = 'none';
     document.getElementById('no-wallet-screen').style.display = 'flex';
+    showUnlockScreen();
+    renderSidebar();
     toast('Wallet locked', 'info');
   });
 
 
-function showWallet(wallet) {
+async function showWallet(wallet) {
   document.getElementById('no-wallet-screen').style.display = 'none';
   document.getElementById('wallet-screen').style.display = 'block';
 
   document.getElementById('hdr-address').textContent = `Address: ${wallet.address}`;
   document.getElementById('hdr-pubkey').textContent = `Public key: ${wallet.publicKey}`;
 
-  refreshBalance();
+  await refreshBalance();
   loadTokens();
-  // renderSidebar();
+  renderSidebar();
   // renderQuickWallets();
   // loadHistory();
   // loadPending();
@@ -324,12 +327,26 @@ async function importWallet() {
   }
 }
 
+function copyMnemonic() {
+  const inputs = document.querySelectorAll('#mnemonic-grid .word-text');
+  const words = Array.from(inputs).map(i => i.textContent.trim()).filter(Boolean);
+  navigator.clipboard.writeText(words.join(' '));
+  toast('Mnemonic copied to clipboard', 'success');
+}
+
+function copyBackupMnemonic() {
+  const inputs = document.querySelectorAll('#backup-mnemonic-grid .word-text');
+  const words = Array.from(inputs).map(i => i.textContent.trim()).filter(Boolean);
+  navigator.clipboard.writeText(words.join(' '));
+  toast('Mnemonic copied to clipboard', 'success');
+}
+
 function pasteMnemonic() {
-  const imputs = document.querySelectorAll('.mnemonic-input-cell input');
+  const inputs = document.querySelectorAll('.mnemonic-input-cell input');
   navigator.clipboard.readText().then(text => {
     const words = text.trim().split(/\s+/);
     words.forEach((w, i) => {
-      const inp = imputs[i];
+      const inp = inputs[i];
       if (inp) inp.value = w;
     });
   });
@@ -446,11 +463,12 @@ async function refreshBalance() {
   if (!activeWallet) return;
   try {
     const data = await api(`/wallet/${activeWallet.address}/eth-balance`);
-    walletBalance = data.balance;
     const marketData = await api('/tokens/market');
-    const ethPriceUSD = marketData.ethereum.priceUSD;
+    const ethPriceUSD = marketData.eth.priceUSD;
+    const walletBalanceUSD = data.balance * ethPriceUSD;
+    walletBalance = walletBalanceUSD;
 
-    document.getElementById('hdr-balance').textContent = '$' + parseFloat(data.balance * ethPriceUSD).toFixed(2);
+    document.getElementById('hdr-balance').textContent = '$' + parseFloat(walletBalanceUSD).toFixed(2);
     // if (data.pendingOut > 0) {
     //   document.getElementById('hdr-pending').textContent = `−${data.pendingOut.toFixed(4)} CVT pending`;
     // } else if (data.pendingIn > 0) {
@@ -461,21 +479,30 @@ async function refreshBalance() {
     // activeWallet.balance = data.confirmed;
     // activeWallet.available = data.available;
   } catch (e) {
-
+    toast('Error fetching balance', 'error');
   }
 }
 
 // ── RENDER SIDEBAR ───────────────────────────────────────
 function renderSidebar() {
   const el = document.getElementById('wallet-list-sidebar');
-  el.innerHTML = allWallets.map(w => `
-    <div class="sidebar-wallet-item ${activeWallet?.address === w.address ? 'active' : ''}"
-         onclick="selectWallet('${w.address}')">
+  el.innerHTML = '';
+  // el.innerHTML = allWallets.map(w => `
+  //   <div class="sidebar-wallet-item ${activeWallet?.address === w.address ? 'active' : ''}"
+  //        onclick="selectWallet('${w.address}')">
+  //     <div class="sw-label">Wallet</div>
+  //     <div class="sw-address">${fmt(w.address)}</div>
+  //     <div class="sw-balance">${parseFloat(w.balance || 0).toFixed(4)} CVT</div>
+  //   </div>
+  // `).join('');
+
+  el.innerHTML = `
+    <div class="sidebar-wallet-item active">
       <div class="sw-label">Wallet</div>
-      <div class="sw-address">${fmt(w.address)}</div>
-      <div class="sw-balance">${parseFloat(w.balance || 0).toFixed(4)} CVT</div>
+      <div class="sw-address">${fmt(activeWallet.address)}</div>
+      <div class="sw-balance">$${parseFloat(walletBalance).toFixed(2)}</div>
     </div>
-  `).join('');
+  `;
 }
 
 function renderQuickWallets() {
@@ -607,6 +634,7 @@ async function sendTransaction() {
   };
 
   const signedTx = await activeWallet.signTransaction(tx);
+  console.log('Signed transaction:', signedTx);
 
   try {
     const data = await api('/transaction/send', {
@@ -620,8 +648,7 @@ async function sendTransaction() {
     document.getElementById('send-to').value = '';
     document.getElementById('send-amount').value = '';
     pendingTx = null;
-    document.querySelector(".tab[data-tab=\"history\"]").click();
-    // await refreshAll();
+    backToSendForm();
 
   } catch (e) {
     errEl.textContent = e.message;
@@ -663,29 +690,92 @@ async function loadTokens() {
       {
         name: 'Ethereum',
         symbol: 'ETH',
-        icon: '⟠',
-        price: balance * data.ethereum.priceUSD,
-        change24h: data.ethereum.change24h,
+        icon: 'https://assets.coingecko.com/coins/images/279/thumb/ethereum.png',
+        price: balance * data.eth.priceUSD,
+        change24h: data.eth.change24h,
         balance: balance,
         badge: 'Earn'
       },
       {
         name: 'Solana',
         symbol: 'SOL',
-        icon: '◎',
-        price: 0 * data.solana.priceUSD,
-        change24h: data.solana.change24h,
+        icon: 'https://assets.coingecko.com/coins/images/4128/thumb/solana.png',
+        price: 0 * data.sol.priceUSD,
+        change24h: data.sol.change24h,
         balance: 0,
         badge: ''
       },
       {
         name: 'Bitcoin',
         symbol: 'BTC',
-        icon: '₿',
-        price: 0 * data.bitcoin.priceUSD,
-        change24h: data.bitcoin.change24h,
+        icon: 'https://assets.coingecko.com/coins/images/1/thumb/bitcoin.png',
+        price: 0 * data.btc.priceUSD,
+        change24h: data.btc.change24h,
         balance: 0,
         badge: 'Native SegWit'
+      },
+      {
+        name: 'Tether',
+        symbol: 'USDT',
+        icon: 'https://assets.coingecko.com/coins/images/325/thumb/Tether.png',
+        price: 0 * data.usdt.priceUSD,
+        change24h: data.usdt.change24h,
+        balance: 0,
+        badge: 'Stablecoin'
+      },
+      {
+        name: 'USD Coin',
+        symbol: 'USDC',
+        icon: 'https://assets.coingecko.com/coins/images/6319/thumb/USD_Coin_icon.png',
+        price: 0 * data.usdc.priceUSD,
+        change24h: data.usdc.change24h,
+        balance: 0,
+        badge: 'Stablecoin'
+      },
+      {
+        name: 'Binance Coin',
+        symbol: 'BNB',
+        icon: 'https://assets.coingecko.com/coins/images/825/thumb/bnb-icon2_2x.png',
+        price: 0 * data.bnb.priceUSD,
+        change24h: data.bnb.change24h,
+        balance: 0,
+        badge: ''
+      },
+      {
+        name: 'Cardano',
+        symbol: 'ADA',
+        icon: 'https://assets.coingecko.com/coins/images/975/thumb/cardano.png',
+        price: 0 * data.ada.priceUSD,
+        change24h: data.ada.change24h,
+        balance: 0,
+        badge: ''
+      },
+      {
+        name: 'XRP',
+        symbol: 'XRP',
+        icon: 'https://assets.coingecko.com/coins/images/44/thumb/xrp-symbol-white-128.png',
+        price: 0 * data.xrp.priceUSD,
+        change24h: data.xrp.change24h,
+        balance: 0,
+        badge: ''
+      },
+      {
+        name: 'Polkadot',
+        symbol: 'DOT',
+        icon: 'https://assets.coingecko.com/coins/images/12171/thumb/polkadot.png',
+        price: 0 * data.dot.priceUSD,
+        change24h: data.dot.change24h,
+        balance: 0,
+        badge: ''
+      },
+      {
+        name: 'Chainlink',
+        symbol: 'LINK',
+        icon: 'https://assets.coingecko.com/coins/images/877/thumb/chainlink-new-logo.png',
+        price: 0 * data.link.priceUSD,
+        change24h: data.link.change24h,
+        balance: 0,
+        badge: ''
       }
     ];
 
@@ -702,7 +792,7 @@ function renderTokenItem(token) {
   
   return `
     <div class="token-item">
-      <div class="token-icon">${token.icon}</div>
+      <img src="${token.icon}" alt="${token.name}" class="token-icon">
       <div class="token-info">
         <div class="token-name">${token.name}${badgeHtml}</div>
         <div class="token-change ${changeClass}">${changeSign} ${Math.abs(token.change24h).toFixed(2)}%</div>
@@ -755,18 +845,44 @@ function showTxDetail(tx) {
   openModal('tx-detail-modal');
 }
 
+// LOAD ATTACK DEMO ───────────────────────────────────────────
+function loadAttack() {
+  
+}
+
+async function runReplayAttack() {
+  const signedTx = document.getElementById('replay-signed-transaction').value.trim();
+  if (!signedTx) {
+    document.getElementById('ra-result').textContent = 'Please enter signed transaction data';
+    return;
+  }
+  try {
+    const data = await api('/transaction/send', {
+      method: 'POST',
+      body: JSON.stringify({ signedTx })
+    });
+    result = data.result;
+    document.getElementById('ra-result').textContent = `Attack successful! New transaction hash: ${result.hash}`;
+    document.getElementById('ra-result').style.color = 'green';
+  } catch (e) {
+    document.getElementById('ra-result').textContent = `Attack failed: ${e.message}`;
+    document.getElementById('ra-result').style.color = 'red';
+  }
+}
+
 // // ── REFRESH ──────────────────────────────────────────────
-// async function refreshAll() {
-//   try {
-//     allWallets = await api('/wallets');
-//     renderSidebar();
-//     if (activeWallet) {
-//       activeWallet = allWallets.find(w => w.address === activeWallet.address) || activeWallet;
-//       renderQuickWallets();
-//       refreshBalance();
-//     }
-//   } catch (e) {}
-// }
+async function refreshAll() {
+  try {
+    if (activeWallet) {
+      await refreshBalance();
+      renderSidebar();
+      await renderTokens();
+    }
+    
+  } catch (e) {
+    toast('Error refreshing data', 'error');
+  }
+}
 
 // ── INIT ─────────────────────────────────────────────────
 async function init() {

@@ -15,8 +15,9 @@ async function getTokenBalance(tokenAddress, walletAddress) {
 }
 
 async function getMarketData() {
+  const symbols = `["BTCUSDT","ETHUSDT","SOLUSDT","BNBUSDT","ADAUSDT","XRPUSDT","DOTUSDT","LINKUSDT"]`;
   const res = await fetch(
-    'https://api.binance.com/api/v3/ticker/24hr?symbols=["BTCUSDT","ETHUSDT","SOLUSDT"]'
+    `https://api.binance.com/api/v3/ticker/24hr?symbols=${symbols}`
   );
 
   if (!res.ok) {
@@ -25,30 +26,21 @@ async function getMarketData() {
 
   const data = await res.json();
 
-  return data.reduce((acc, item) => {
-    if (item.symbol === "BTCUSDT") {
-      acc.bitcoin = {
-        priceUSD: Number(item.lastPrice),
-        change24h: Number(item.priceChangePercent)
-      };
-    }
+  const result = {};
 
-    if (item.symbol === "ETHUSDT") {
-      acc.ethereum = {
-        priceUSD: Number(item.lastPrice),
-        change24h: Number(item.priceChangePercent)
-      };
-    }
+  data.forEach(item => {
+    const symbol = item.symbol.replace('USDT', '').toLowerCase();
+    result[symbol] = {
+      priceUSD: Number(item.lastPrice),
+      change24h: Number(item.priceChangePercent)
+    };
+  });
 
-    if (item.symbol === "SOLUSDT") {
-      acc.solana = {
-        priceUSD: Number(item.lastPrice),
-        change24h: Number(item.priceChangePercent)
-      };
-    }
+  // Add stablecoins
+  result.usdt = { priceUSD: 1, change24h: 0 };
+  result.usdc = { priceUSD: 1, change24h: 0 };
 
-    return acc;
-  }, {});
+  return result;
 }
 
 module.exports = {
