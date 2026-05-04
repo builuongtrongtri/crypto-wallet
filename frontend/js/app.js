@@ -701,7 +701,9 @@ async function renderHistoryWithPending() {
     const txItems = [];
 
     if (currentPendingTx) {
-      txItems.push(renderTxItem(currentPendingTx, activeWallet.address));
+      currentPendingTx.from = currentPendingTx.from.toLowerCase();
+      currentPendingTx.to = currentPendingTx.to.toLowerCase();
+      txItems.push(renderTxItem(currentPendingTx));
     }
 
     if (!data.transactions || !data.transactions.length) {
@@ -711,7 +713,7 @@ async function renderHistoryWithPending() {
       }
     }
 
-    const historyItems = (data.transactions || []).map(tx => renderTxItem(tx, activeWallet.address));
+    const historyItems = (data.transactions || []).map(tx => renderTxItem(tx));
     el.innerHTML = [...txItems, ...historyItems].join('');
   } catch (e) {
     el.innerHTML = '<div style="color:var(--red)">Error loading history</div>';
@@ -728,21 +730,15 @@ async function pollPendingTransactionStatus(txHash) {
       if (receipt && currentPendingTx && currentPendingTx.hash === txHash) {
         clearInterval(pendingPollingTimer);
         pendingPollingTimer = null;
-
-        currentPendingTx = {
-          ...currentPendingTx,
-          status: receipt.status === 1 ? 'confirmed' : 'failed',
-          blockNumber: receipt.blockNumber,
-          confirmations: receipt.blockNumber ? (await provider.getBlockNumber()) - receipt.blockNumber : 0
-        };
+        currentPendingTx = null;
         renderHistoryWithPending();
+        refreshBalance();
         toast(`Transaction ${receipt.status === 1 ? 'confirmed' : 'failed'} on blockchain.`, receipt.status === 1 ? 'success' : 'error');
       }
     } catch (err) {
       // ignore temporary network errors
     }
   };
-
   await checkStatus();
   pendingPollingTimer = setInterval(checkStatus, 5000);
 }
@@ -882,7 +878,7 @@ function renderTokenItem(token) {
 
 
 
-function renderTxItem(tx, myAddress) {
+function renderTxItem(tx) {
   const status = tx.status || 'success';
   const isOut = tx.type === 'out';
   const dir = isOut ? 'out' : 'in';
