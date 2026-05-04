@@ -35,6 +35,7 @@ async function saveWallet(data) {
       iv: data.iv,
       salt: data.salt,
       authTag: data.authTag,
+      accountCount: data.accountCount || null,
       createdAt: Date.now()
     };
 
@@ -76,6 +77,31 @@ async function getWallet() {
   });
 }
 
+async function updateAccountCount(count) {
+  const db = await openDB();
+
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE_NAME, "readwrite");
+    const store = tx.objectStore(STORE_NAME);
+
+    const getReq = store.get("main-wallet");
+
+    getReq.onsuccess = () => {
+      const data = getReq.result;
+      if (!data) return reject(new Error("Wallet not found"));
+      
+      data.accountCount = count;
+      
+      const putReq = store.put(data);
+      putReq.onsuccess = () => resolve(true);
+      putReq.onerror = () => reject(putReq.error);
+    };
+
+    getReq.onerror = () => reject(getReq.error);
+  });
+}
+
 window.saveWallet = saveWallet;
 window.hasWallet = hasWallet;
 window.getWallet = getWallet;
+window.updateAccountCount = updateAccountCount;

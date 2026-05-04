@@ -4,6 +4,7 @@ const provider = new ethers.JsonRpcProvider(
 
 const API = 'http://localhost:3000/api';
 let activeWallet = null;
+let activeWalletIndex = 0;
 let walletBalance = 0;
 let allWallets = [];
 let lastTxRef = null;
@@ -130,7 +131,7 @@ async function createWallet() {
       body: JSON.stringify({ password: pw })
     });
     createWalletModal();
-    // await refreshAll();
+    await refreshAll();
     // selectWallet(data.address);
 
     // Show mnemonic display modal
@@ -140,7 +141,8 @@ async function createWallet() {
       encryptedMnemonic: data.vault.encryptedMnemonic,
       iv: data.vault.iv,
       salt: data.vault.salt,
-      authTag: data.vault.authTag
+      authTag: data.vault.authTag,
+      accountCount: 1
     });
     activeWallet = ethers.Wallet.fromPhrase(data.mnemonic);
     saveSession(activeWallet);
@@ -175,8 +177,11 @@ async function unlockWallet() {
       }) 
     });
     activeWallet = ethers.Wallet.fromPhrase(data.mnemonic);
+    await reloadWallets();
+    await refreshAll();
+    const session = loadSession();
+    activeWalletIndex = session ? session.activeIndex : 0;
     saveSession(activeWallet);
-
     showWallet(activeWallet);
     toast('Wallet unlocked!', 'success');
     document.getElementById('password').value = '';
@@ -191,9 +196,11 @@ document.getElementById('lockWallet-btn')
     clearSession();
     activeWallet = null;
     document.getElementById('wallet-screen').style.display = 'none';
-    document.getElementById('no-wallet-screen').style.display = 'flex';
+    document.querySelector('#no-wallet-screen').style.display = 'flex';
+    document.querySelector('#no-wallet-screen #create-wallet-screen').style.display = 'none';
+    document.querySelector('#no-wallet-screen #unlock-screen').style.display = 'flex';
+    document.getElementById('wallet-list-sidebar').innerHTML = '';
     showUnlockScreen();
-    renderSidebar();
     toast('Wallet locked', 'info');
   });
 
@@ -299,11 +306,14 @@ async function importFromMnemonic() {
     });
     activeWallet = ethers.Wallet.fromPhrase(mnemonic);
 
-    console.log('Imported wallet:', activeWallet.address);
+    await reloadWallets();
+    await refreshAll();
     saveSession(activeWallet);
+    updateAccountCount(allWallets.length);
     closeAllModals();
     showWallet(data.address);
     toast(`Wallet imported!`, 'success');
+    document.getElementById('import-mnemonic-password').value = '';
   } catch (e) {
     errEl.textContent = "Invalid mnemonic or error importing wallet";
   }
@@ -486,36 +496,49 @@ async function refreshBalance() {
 // ── RENDER SIDEBAR ───────────────────────────────────────
 function renderSidebar() {
   const el = document.getElementById('wallet-list-sidebar');
-  el.innerHTML = '';
-  // el.innerHTML = allWallets.map(w => `
-  //   <div class="sidebar-wallet-item ${activeWallet?.address === w.address ? 'active' : ''}"
-  //        onclick="selectWallet('${w.address}')">
-  //     <div class="sw-label">Wallet</div>
-  //     <div class="sw-address">${fmt(w.address)}</div>
-  //     <div class="sw-balance">${parseFloat(w.balance || 0).toFixed(4)} CVT</div>
-  //   </div>
-  // `).join('');
+  let html = '';
+  for (let i = 0; i < allWallets.length; i++) {
+    const w = allWallets[i];
+    const isActive = (i === activeWalletIndex);
+    let balStr = isActive ? `$${parseFloat(walletBalance).toFixed(2)}` : "Loading...";
+    html += `
+      <div class="sidebar-wallet-item ${isActive ? 'active' : ''}" onclick="selectAccount(${i})">
+        <div class="sw-label">Account ${i + 1}</div>
+        <div class="sw-address">${fmt(w.address)}</div>
+        <div class="sw-balance" id="sidebar-bal-${i}">${balStr}</div>
+      </div>
+    `;
+  }
+  el.innerHTML = html;
 
-  el.innerHTML = `
-    <div class="sidebar-wallet-item active">
-      <div class="sw-label">Wallet</div>
-      <div class="sw-address">${fmt(activeWallet.address)}</div>
-      <div class="sw-balance">$${parseFloat(walletBalance).toFixed(2)}</div>
-    </div>
-  `;
+  // Load balances for inactive accounts
+  for (let i = 0; i < allWallets.length; i++) {
+    if (i !== activeWalletIndex) {
+      const w = allWallets[i];
+      api(`/wallet/${w.address}/eth-balance`).then(async data => {
+        const marketData = await api('/tokens/market');
+        const balUSD = data.balance * marketData.eth.priceUSD;
+        const balEl = document.getElementById(`sidebar-bal-${i}`);
+        if (balEl) balEl.textContent = `$${parseFloat(balUSD).toFixed(2)}`;
+      }).catch(e => {
+        const balEl = document.getElementById(`sidebar-bal-${i}`);
+        if (balEl) balEl.textContent = `Error`;
+      });
+    }
+  }
 }
 
-function renderQuickWallets() {
-  const others = allWallets.filter(w => w.address !== activeWallet?.address);
-  const el = document.getElementById('quick-wallet-list');
-  if (!others.length) { el.innerHTML = '<div style="font-size:12px;color:var(--text3)">No other wallets. Create one first.</div>'; return; }
-  el.innerHTML = others.map(w => `
-    <div class="quick-wallet-btn" onclick="document.getElementById('send-to').value='${w.address}'">
-      <span class="qw-addr">${fmt(w.address)}</span>
-      <span class="qw-bal">${parseFloat(w.balance || 0).toFixed(4)} CVT</span>
-    </div>
-  `).join('');
-}
+// function renderQuickWallets() {
+//   const others = allWallets.filter(w => w.address !== activeWallet?.address);
+//   const el = document.getElementById('quick-wallet-list');
+//   if (!others.length) { el.innerHTML = '<div style="font-size:12px;color:var(--text3)">No other wallets. Create one first.</div>'; return; }
+//   el.innerHTML = others.map(w => `
+//     <div class="quick-wallet-btn" onclick="document.getElementById('send-to').value='${w.address}'">
+//       <span class="qw-addr">${fmt(w.address)}</span>
+//       <span class="qw-bal">${parseFloat(w.balance || 0).toFixed(4)} CVT</span>
+//     </div>
+//   `).join('');
+// }
 
 // ── SEND TRANSACTION ─────────────────────────────────────
 let pendingTx = null;
@@ -870,6 +893,120 @@ async function runReplayAttack() {
   }
 }
 
+// ── MULTI-ACCOUNT ───────────────────────────────────────
+async function hasActivity(wallet) {
+  const balance = await provider.getBalance(wallet.address);
+
+  // từng có ETH
+  if (balance > 0n) return true;
+
+  // từng có transaction
+  const txCount = await provider.getTransactionCount(wallet.address);
+
+  return txCount > 0;
+}
+
+async function reloadWallets() {
+  if (!activeWallet) return;
+
+  allWallets = [];
+
+  const walletData = await getWallet();
+
+  // nếu còn local data thì load nhanh
+  if (walletData?.accountCount) {
+    for (let i = 0; i < walletData.accountCount; i++) {
+      const wallet = ethers.HDNodeWallet.fromPhrase(
+        activeWallet.mnemonic.phrase,
+        null,
+        `m/44'/60'/0'/0/${i}`
+      );
+
+      allWallets.push(wallet);
+    }
+  }
+
+  // // mất local data => scan blockchain
+  else {
+    let emptyCount = 0;
+    let index = 0;
+
+    while (emptyCount < 5) { // test trước, sau tăng lên 20
+      const wallet = ethers.HDNodeWallet.fromPhrase(
+        activeWallet.mnemonic.phrase,
+        null,
+        `m/44'/60'/0'/0/${index}`
+      );
+
+      console.log(wallet)
+
+      const used = await hasActivity(wallet);
+
+      if (used) {
+        allWallets.push(wallet);
+        emptyCount = 0;
+      } else {
+        emptyCount++;
+      }
+
+      index++;
+    }
+
+    // ít nhất phải có account 0
+    if (allWallets.length === 0) {
+      const wallet = ethers.HDNodeWallet.fromPhrase(
+        activeWallet.mnemonic.phrase,
+        null,
+        `m/44'/60'/0'/0/0`
+      );
+
+      allWallets.push(wallet);
+    }
+  }
+
+  if (activeWalletIndex >= allWallets.length) {
+    activeWalletIndex = 0;
+  }
+
+  activeWallet = allWallets[activeWalletIndex];
+}
+
+async function selectAccount(index) {
+  activeWalletIndex = index;
+  activeWallet = allWallets[activeWalletIndex];
+  saveSession(activeWallet, activeWalletIndex);
+  showWallet(activeWallet);
+}
+
+async function addNewAccount() {
+  if (!activeWallet.mnemonic.phrase) {
+    toast('Please unlock your wallet first', 'error');
+    return;
+  }
+
+  try {
+    const newIndex = allWallets.length;
+
+    const wallet = ethers.HDNodeWallet.fromPhrase(
+      activeWallet.mnemonic.phrase,
+      null,
+      `m/44'/60'/0'/0/${newIndex}`
+    );
+
+    allWallets.push(wallet);
+
+    // chỉ cache UI thôi
+    await updateAccountCount(allWallets.length);
+
+    await selectAccount(newIndex);
+
+    toast(`Account ${newIndex + 1} created!`, 'success');
+
+  } catch (e) {
+    toast(e.message, 'error');
+  }
+}
+
 // // ── REFRESH ──────────────────────────────────────────────
 async function refreshAll() {
   try {
@@ -897,7 +1034,14 @@ async function init() {
     const session = loadSession();
 
     if (session?.mnemonic) {
-      activeWallet = ethers.Wallet.fromPhrase(session.mnemonic);
+      const currentMnemonic = session.mnemonic;
+      activeWalletIndex = session.activeIndex || 0;
+      activeWallet = ethers.HDNodeWallet.fromPhrase(
+        currentMnemonic,
+        null,
+        `m/44'/60'/0'/0/${activeWalletIndex}`
+      );
+      await reloadWallets();
 
       showWallet(activeWallet);
       toast('Wallet unlocked!', 'success');

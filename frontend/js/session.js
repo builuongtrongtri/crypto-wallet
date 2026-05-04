@@ -1,10 +1,10 @@
 const SESSION_KEY = "active_wallet";
 const SESSION_TIME = 10 * 60 * 1000;
 
-function saveSession(wallet) {
+function saveSession(wallet, activeIndex = 0) {
   localStorage.setItem(SESSION_KEY, JSON.stringify({
-    address: wallet.address,
     mnemonic: wallet.mnemonic.phrase,
+    activeIndex: activeIndex,
     createdAt: Date.now()
   }));
 }
