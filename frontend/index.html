@@ -145,68 +145,273 @@
         <div id="history-list" class="tx-list"></div>
       </div>
 
-      <!-- ATTACK DEMO TAB -->
-      <div id="tab-attack" class="tab-content">
-        <h2>Attack Demo</h2>
-        <div class="attack-grid">
-          <div class="attack-card" id="attack-replay">
-            <div class="attack-icon">🔨</div>
-            <h3>Replay Attack</h3>
-            <p>Send a transaction with a replayed nonce.</p>
-            <div class="attack-controls">
-              <textarea type="text" id="replay-signed-transaction" placeholder="Signed transaction data"></textarea>
-              <button class="btn-attack" onclick="runReplayAttack()">Run Attack</button>
+        <!-- ATTACK DEMO TAB -->
+        <div id="tab-attack" class="tab-content">
+          <div class="attack-demo-header">
+            <div class="attack-demo-title-row">
+              <div class="attack-demo-icon">🛡</div>
+              <div>
+                <h2>Security Test Lab</h2>
+                <p class="attack-demo-subtitle">Mô phỏng kịch bản tấn công phổ biến nhất trên blockchain</p>
+              </div>
             </div>
-            <div id="ra-result" class="attack-result"></div>
           </div>
 
-          <!-- <div class="attack-card" id="attack-tamper">
-            <div class="attack-icon">🔨</div>
-            <h3>Data Tampering</h3>
-            <p>Modify a transaction amount after signing. Shows hash invalidation.</p>
-            <div class="attack-controls">
-              <select id="tamper-tx-select"><option value="">Select a confirmed tx...</option></select>
-              <input type="number" id="tamper-new-amount" placeholder="New fake amount" step="0.01">
-              <button class="btn-attack" onclick="runTamperAttack()">Run Attack</button>
+          <!-- ═══════════════════════════════════════════════════ -->
+          <!-- DATA INTEGRITY ATTACK                     -->
+          <!-- ═══════════════════════════════════════════════════ -->
+          <div class="scenario-card" id="scenario-integrity">
+            <div class="scenario-header">
+              <div class="scenario-title-block">
+                <h3>Kiểm thử tính toàn vẹn dữ liệu <span class="scenario-tag integrity">Data Integrity</span></h3>
+                <p>Chứng minh hệ thống từ chối giao dịch nếu dữ liệu bị sửa đổi sau khi ký. Chữ ký ECDSA bảo vệ tính
+                  toàn vẹn tuyệt đối.</p>
+              </div>
+              <div class="scenario-icon">🧪</div>
             </div>
-            <div id="tamper-result" class="attack-result"></div>
+
+            <div class="scenario-body">
+              <!-- Timeline flow -->
+              <div class="scenario-flow">
+                <!-- STEP 1 -->
+                <div class="flow-step" id="integrity-flow-step1">
+                  <div class="flow-step-marker active">
+                    <span class="flow-step-num">1</span>
+                  </div>
+                  <div class="flow-step-content">
+                    <div class="flow-step-title">Tạo & Ký giao dịch gốc</div>
+                    <div class="flow-step-desc">Nhập thông tin giao dịch, hệ thống sẽ tạo hash SHA-256 và ký bằng ECDSA
+                      secp256k1.</div>
+                    <div class="flow-step-form">
+                      <div class="flow-form-grid">
+                        <div class="flow-field">
+                          <label>Người gửi (From)</label>
+                          <input type="text" id="integrity-from" placeholder="0x... (tự điền)" class="monospace"
+                            readonly>
+                        </div>
+                        <div class="flow-field">
+                          <label>Người nhận (To)</label>
+                          <input type="text" id="integrity-to" placeholder="0x..." class="monospace">
+                        </div>
+                        <div class="flow-field">
+                          <label>Số tiền gốc (ETH)</label>
+                          <input type="number" id="integrity-original-amount" placeholder="0.001" step="0.0001"
+                            min="0.0001" value="0.001">
+                        </div>
+                        <div class="flow-field">
+                          <label>Nonce</label>
+                          <input type="number" id="integrity-nonce" placeholder="Tự lấy" min="0">
+                        </div>
+                      </div>
+                      <button class="btn-action btn-sign-action" id="integrity-sign-btn" onclick="signOriginalTx()">
+                        <span class="btn-action-icon">✍️</span>
+                        <span>Ký giao dịch bằng ECDSA</span>
+                      </button>
+                    </div>
+                    <!-- Sign result -->
+                    <div id="integrity-sign-result" class="sign-result-box" style="display:none">
+                      <div class="sign-result-item">
+                        <div class="sign-result-label">🔏 Chữ ký ECDSA (secp256k1)</div>
+                        <div id="integrity-signature-display" class="sign-result-value"></div>
+                      </div>
+                      <div class="sign-result-item">
+                        <div class="sign-result-label">📋 Hash dữ liệu gốc (Keccak-256)</div>
+                        <div id="integrity-hash-display" class="sign-result-value"></div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- STEP 2 -->
+                <div class="flow-step" id="integrity-flow-step2">
+                  <div class="flow-step-marker" id="integrity-marker-2">
+                    <span class="flow-step-num">2</span>
+                  </div>
+                  <div class="flow-step-content">
+                    <div class="flow-step-title">💀 Kẻ tấn công sửa đổi dữ liệu</div>
+                    <div class="flow-step-desc">Giả lập kẻ tấn công chặn giao dịch giữa đường và thay đổi số tiền.</div>
+                    <div class="flow-step-form" id="integrity-step2-form" style="display:none">
+                      <div class="tamper-input-row">
+                        <div class="flow-field" style="flex:1">
+                          <label>💀 Amount giả mạo (ETH)</label>
+                          <input type="number" id="integrity-tamper-amount" placeholder="9999" step="0.001" min="0.001"
+                            value="9999">
+                        </div>
+                      </div>
+                      <button class="btn-action btn-attack-action" onclick="runIntegrityAttack()">
+                        <span class="btn-action-icon">⚔️</span>
+                        <span>Phát sóng giao dịch bị sửa đổi</span>
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- STEP 3: KẾT QUẢ -->
+                <div class="flow-step" id="integrity-flow-step3">
+                  <div class="flow-step-marker" id="integrity-marker-3">
+                    <span class="flow-step-num">3</span>
+                  </div>
+                  <div class="flow-step-content">
+                    <div class="flow-step-title">Kết quả xác minh</div>
+                    <div id="integrity-result" class="scenario-result"></div>
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
 
-          <div class="attack-card" id="attack-double-spend">
-            <div class="attack-icon">⚡</div>
-            <h3>Double Spending</h3>
-            <p>Send 2 transactions simultaneously exceeding balance. Race condition demo.</p>
-            <div class="attack-controls">
-              <input type="text" id="ds-to" placeholder="Target address (0x...)">
-              <input type="number" id="ds-amount" placeholder="Amount per tx" step="0.1">
-              <input type="password" id="ds-password" placeholder="Wallet password">
-              <button class="btn-attack" onclick="runDoubleSpend()">Send Both</button>
+          <!-- ═══════════════════════════════════════════════════ -->
+          <!-- 3.4.3 — NONCE / REPLAY ATTACK                     -->
+          <!-- ═══════════════════════════════════════════════════ -->
+          <div class="scenario-card" id="scenario-nonce">
+            <div class="scenario-header">
+              <div class="scenario-title-block">
+                <h3>Kiểm thử logic Nonce <span class="scenario-tag nonce">Replay Attack</span></h3>
+                <p>Chứng minh ví luôn đếm và gắn đúng Nonce. Khi dán lại giao dịch đã phát sóng, mạng lưới sẽ từ chối vì
+                  Nonce đã được sử dụng.</p>
+              </div>
+              <div class="scenario-icon">🔁</div>
             </div>
-            <div id="ds-result" class="attack-result"></div>
+
+            <div class="scenario-body">
+              <div class="scenario-flow">
+                <!-- STEP 1: Gửi giao dịch gốc -->
+                <div class="flow-step" id="nonce-flow-step1">
+                  <div class="flow-step-marker active">
+                    <span class="flow-step-num">1</span>
+                  </div>
+                  <div class="flow-step-content">
+                    <div class="flow-step-title">Gửi giao dịch gốc lên mạng</div>
+                    <div class="flow-step-desc">Tạo và phát sóng một giao dịch hợp lệ. Hệ thống sẽ tự động gắn Nonce
+                      tăng dần và lưu lại <code>signedTx</code> để dùng cho bước replay.</div>
+                    <div class="flow-step-form">
+                      <div class="flow-form-grid">
+                        <div class="flow-field">
+                          <label>Người nhận (To)</label>
+                          <input type="text" id="nonce-to" placeholder="0x..." class="monospace">
+                        </div>
+                        <div class="flow-field">
+                          <label>Số tiền (ETH)</label>
+                          <input type="number" id="nonce-amount" placeholder="0.0001" step="0.0001" min="0.0001"
+                            value="0.0001">
+                        </div>
+                      </div>
+                      <button class="btn-action btn-sign-action" id="nonce-send-btn" onclick="nonceStepSendTx()">
+                        <span class="btn-action-icon">📤</span>
+                        <span>Gửi giao dịch gốc</span>
+                      </button>
+                    </div>
+                    <div id="nonce-step1-result" class="sign-result-box" style="display:none"></div>
+                  </div>
+                </div>
+
+                <!-- STEP 2: Replay -->
+                <div class="flow-step" id="nonce-flow-step2">
+                  <div class="flow-step-marker" id="nonce-marker-2">
+                    <span class="flow-step-num">2</span>
+                  </div>
+                  <div class="flow-step-content">
+                    <div class="flow-step-title">🔁 Phát lại giao dịch (Replay Attack)</div>
+                    <div class="flow-step-desc">Dán lại đúng <code>signedTx</code> hex đã broadcast ở bước 1 (hoặc bất
+                      kỳ signedTx cũ nào). Mạng Sepolia sẽ từ chối vì Nonce đã bị dùng.</div>
+                    <div class="flow-step-form" id="nonce-step2-form">
+                      <div class="flow-field" style="width:100%">
+                        <label>Signed Transaction Hex</label>
+                        <textarea id="replay-signed-transaction"
+                          placeholder="Dán signed transaction hex (0x...) vào đây — tự động điền sau bước 1"
+                          rows="3"></textarea>
+                      </div>
+                      <button class="btn-action btn-attack-action" id="replay-btn" onclick="runReplayAttack()">
+                        <span class="btn-action-icon">🔁</span>
+                        <span>Phát lại giao dịch (Replay)</span>
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- STEP 3: Kết quả -->
+                <div class="flow-step" id="nonce-flow-step3">
+                  <div class="flow-step-marker" id="nonce-marker-3">
+                    <span class="flow-step-num">3</span>
+                  </div>
+                  <div class="flow-step-content">
+                    <div class="flow-step-title">Kết quả xác minh Nonce</div>
+                    <div id="ra-result" class="scenario-result"></div>
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
 
-          <div class="attack-card" id="attack-fake-sig">
-            <div class="attack-icon">🎭</div>
-            <h3>Fake Signature</h3>
-            <p>Verify a transaction whose signature was made with a different private key.</p>
-            <div class="attack-controls">
-              <select id="fake-sig-tx"><option value="">Select a pending/confirmed tx...</option></select>
-              <button class="btn-attack" onclick="runFakeSigAttack()">Simulate</button>
+          <!-- ═══════════════════════════════════════════════════ -->
+          <!--RACE ATTACK / PENDING STATE                -->
+          <!-- ═══════════════════════════════════════════════════ -->
+          <div class="scenario-card" id="scenario-race">
+            <div class="scenario-header">
+              <div class="scenario-title-block">
+                <h3>Kiểm thử trạng thái giao dịch <span class="scenario-tag race">Race Attack</span></h3>
+                <p>Gửi giao dịch thật lên Sepolia và theo dõi trạng thái Pending theo thời gian thực. UI cảnh báo ngay
+                  lập tức để ngăn người dùng giao dịch vội vàng.</p>
+              </div>
+              <div class="scenario-icon">⏳</div>
             </div>
-            <div id="fakesig-result" class="attack-result"></div>
-          </div>
 
-          <div class="attack-card" id="attack-multisig">
-            <div class="attack-icon">🔏</div>
-            <h3>Multi-Signature (2/3)</h3>
-            <p>Collect 2 of 3 signatures to authorize a transaction.</p>
-            <div class="attack-controls">
-              <div id="multisig-wallets"></div>
-              <input type="text" id="ms-to" placeholder="Recipient address">
-              <input type="number" id="ms-amount" placeholder="Amount" step="0.1">
-              <button class="btn-attack" onclick="runMultiSig()">Collect Signatures</button>
+            <div class="scenario-body">
+              <div class="race-layout">
+                <!-- Left: Form -->
+                <div class="race-form-panel">
+                  <div class="flow-step-title" style="margin-bottom:12px">Gửi giao dịch & Theo dõi</div>
+                  <div class="flow-step-form">
+                    <div class="flow-field">
+                      <label>Người nhận</label>
+                      <input type="text" id="race-to" placeholder="0x... (địa chỉ Sepolia)" class="monospace">
+                    </div>
+                    <div class="flow-field">
+                      <label>Số lượng ETH</label>
+                      <input type="number" id="race-amount" placeholder="0.0001" step="0.0001" min="0.0001"
+                        value="0.0001">
+                    </div>
+                    <button class="btn-action btn-race-action" id="race-send-btn" onclick="runRaceAttackDemo()">
+                      <span class="btn-action-icon">📡</span>
+                      <span>Gửi & Monitor Pending</span>
+                    </button>
+                  </div>
+                  <div id="race-result" class="scenario-result" style="margin-top:12px"></div>
+                </div>
+
+                <!-- Right: Live Monitor -->
+                <div class="race-monitor-panel">
+                  <div class="monitor-chrome">
+                    <div class="monitor-header">
+                      <div class="monitor-dots">
+                        <span class="mdot red"></span>
+                        <span class="mdot yellow"></span>
+                        <span class="mdot green"></span>
+                      </div>
+                      <span class="monitor-title">📡 Pending State Monitor</span>
+                      <span class="pending-dot" id="pending-dot"></span>
+                    </div>
+                    <div class="monitor-body">
+                      <div id="pending-tx-list" class="pending-tx-list">
+                        <div class="pending-empty">
+                          <div class="pending-empty-icon">📭</div>
+                          <div>Chưa có giao dịch nào đang theo dõi.</div>
+                          <div class="pending-empty-hint">Nhấn "Gửi & Monitor Pending" để bắt đầu.</div>
+                        </div>
+                      </div>
+                      <div id="race-warning" class="race-warning" style="display:none">
+                        <div class="race-warning-icon">🛡</div>
+                        <div>
+                          <strong>Cảnh báo Race Attack!</strong><br>
+                          Có giao dịch đang Pending — không nên gửi thêm giao dịch với cùng Nonce. Chờ xác nhận trước
+                          khi thực hiện giao dịch tiếp.
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
             </div>
-            <div id="multisig-result" class="attack-result"></div> -->
           </div>
         </div>
       </div>

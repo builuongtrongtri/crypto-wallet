@@ -450,25 +450,6 @@ function copyAddress() {
   toast('Address copied!', 'info');
 }
 
-// ── SELECT WALLET ────────────────────────────────────────
-// function selectWallet(address) {
-//   activeWallet = allWallets.find(w => w.address === address);
-//   if (!activeWallet) return;
-
-//   document.getElementById('no-wallet-screen').style.display = 'none';
-//   document.getElementById('wallet-screen').style.display = 'block';
-
-//   document.getElementById('hdr-address').textContent = activeWallet.address;
-//   document.getElementById('hdr-pubkey').textContent = activeWallet.publicKey
-//     ? activeWallet.publicKey.slice(0, 40) + '...' : '';
-
-//   refreshBalance();
-//   renderSidebar();
-//   renderQuickWallets();
-//   loadHistory();
-//   loadPending();
-// }
-
 async function refreshBalance() {
   if (!activeWallet) return;
   try {
@@ -542,6 +523,8 @@ function renderSidebar() {
 
 // ── SEND TRANSACTION ─────────────────────────────────────
 let pendingTx = null;
+let currentPendingTx = null;
+let pendingPollingTimer = null;
 
 function isValidAddress(address) {
   return ethers.isAddress(address);
@@ -634,6 +617,14 @@ function backToSendForm() {
   document.querySelector('.send-form').classList.remove('hidden');
 }
 
+function activateTab(tabName) {
+  document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === tabName));
+  document.querySelectorAll('.tab-content').forEach(c => c.classList.toggle('active', c.id === `tab-${tabName}`));
+  if (tabName === 'history') {
+    renderHistoryWithPending();
+  }
+}
+
 async function sendTransaction() {
   const to = document.getElementById('review-to').textContent.trim();
   const amount = document.getElementById('review-amount').textContent.replace("ETH", "").trim();
@@ -665,13 +656,29 @@ async function sendTransaction() {
       body: JSON.stringify({ signedTx })
     });
 
-    result = data.result;
-    console.log('Transaction broadcasted:', result);
-    toast(`Transaction broadcast! ID: ${result.hash.slice(0, 20)}...`, 'success');
+    const result = data.result;
+    const txHash = result.hash;
+    const feePrice = feeData.maxFeePerGas || feeData.gasPrice;
+    const estimatedFee = feePrice ? ethers.formatEther(gasLimit * feePrice) : '0';
+
+    currentPendingTx = {
+      hash: txHash,
+      from: activeWallet.address,
+      to,
+      amount,
+      type: 'out',
+      status: 'pending',
+      timestamp: Date.now(),
+      gasFee: estimatedFee
+    };
+
+    toast(`Transaction broadcast! ID: ${txHash.slice(0, 20)}...`, 'success');
     document.getElementById('send-to').value = '';
     document.getElementById('send-amount').value = '';
     pendingTx = null;
     backToSendForm();
+    activateTab('history');
+    pollPendingTransactionStatus(txHash);
 
   } catch (e) {
     errEl.textContent = e.message;
@@ -682,17 +689,62 @@ async function sendTransaction() {
 // ── LOAD HISTORY ─────────────────────────────────────────
 async function loadHistory() {
   if (!activeWallet) return;
+  renderHistoryWithPending();
+}
+
+async function renderHistoryWithPending() {
+  if (!activeWallet) return;
   const el = document.getElementById('history-list');
+
   try {
     const data = await api(`/transaction/history/${activeWallet.address}`);
-    if (!data.transactions || !data.transactions.length) {
-      el.innerHTML = '<div style="color:var(--text3);font-size:13px;padding:20px">No transactions yet.</div>';
-      return;
+    const txItems = [];
+
+    if (currentPendingTx) {
+      txItems.push(renderTxItem(currentPendingTx, activeWallet.address));
     }
-    el.innerHTML = data.transactions.map(tx => renderTxItem(tx, activeWallet.address, 'confirmed')).join('');
-  } catch (e) { 
-    el.innerHTML = '<div style="color:var(--red)">Error loading history</div>'; 
+
+    if (!data.transactions || !data.transactions.length) {
+      if (!txItems.length) {
+        el.innerHTML = '<div style="color:var(--text3);font-size:13px;padding:20px">No transactions yet.</div>';
+        return;
+      }
+    }
+
+    const historyItems = (data.transactions || []).map(tx => renderTxItem(tx, activeWallet.address));
+    el.innerHTML = [...txItems, ...historyItems].join('');
+  } catch (e) {
+    el.innerHTML = '<div style="color:var(--red)">Error loading history</div>';
   }
+}
+
+async function pollPendingTransactionStatus(txHash) {
+  if (!txHash) return;
+  if (pendingPollingTimer) clearInterval(pendingPollingTimer);
+
+  const checkStatus = async () => {
+    try {
+      const receipt = await provider.getTransactionReceipt(txHash);
+      if (receipt && currentPendingTx && currentPendingTx.hash === txHash) {
+        clearInterval(pendingPollingTimer);
+        pendingPollingTimer = null;
+
+        currentPendingTx = {
+          ...currentPendingTx,
+          status: receipt.status === 1 ? 'confirmed' : 'failed',
+          blockNumber: receipt.blockNumber,
+          confirmations: receipt.blockNumber ? (await provider.getBlockNumber()) - receipt.blockNumber : 0
+        };
+        renderHistoryWithPending();
+        toast(`Transaction ${receipt.status === 1 ? 'confirmed' : 'failed'} on blockchain.`, receipt.status === 1 ? 'success' : 'error');
+      }
+    } catch (err) {
+      // ignore temporary network errors
+    }
+  };
+
+  await checkStatus();
+  pendingPollingTimer = setInterval(checkStatus, 5000);
 }
 
 // ── LOAD TOKENS ──────────────────────────────────────────
@@ -830,10 +882,13 @@ function renderTokenItem(token) {
 
 
 
-function renderTxItem(tx, myAddress, status) {
+function renderTxItem(tx, myAddress) {
+  const status = tx.status || 'success';
   const isOut = tx.type === 'out';
   const dir = isOut ? 'out' : 'in';
   const icon = isOut ? '↑' : '↓';
+  const statusClass = status === 'pending' ? 'pending' : status === 'success' ? 'confirmed' : 'failed';
+  const statusLabel = status === 'pending' ? 'PENDING' : status === 'success' ? 'CONFIRMED' : 'FAILED';
   const txJson = JSON.stringify(tx).replace(/"/g, '&quot;');
 
   return `
@@ -845,7 +900,7 @@ function renderTxItem(tx, myAddress, status) {
       </div>
       <div class="tx-amount">
         <div class="tx-amount-val ${dir}">${fmtAmt(tx.amount, dir)} ETH</div>
-        <div class="tx-status confirmed">CONFIRMED</div>
+        <div class="tx-status ${statusClass}">${statusLabel}</div>
       </div>
     </div>
   `;
@@ -857,7 +912,7 @@ function showTxDetail(tx) {
     <div class="detail-row"><div class="detail-label">From</div><div class="detail-val">${tx.from}</div></div>
     <div class="detail-row"><div class="detail-label">To</div><div class="detail-val">${tx.to}</div></div>
     <div class="detail-row"><div class="detail-label">Amount</div><div class="detail-val">${tx.amount} ETH</div></div>
-    <div class="detail-row"><div class="detail-label">Status</div><div class="detail-val">${tx.status}</div></div>
+    <div class="detail-row"><div class="detail-label">Status</div><div class="detail-val">${tx.status || 'confirmed'}</div></div>
     <div class="detail-row"><div class="detail-label">Timestamp</div><div class="detail-val">${fmtTime(tx.timestamp)}</div></div>
     <div class="detail-row"><div class="detail-label">Total gas fee</div><div class="detail-val">${tx.gasFee} ETH</div></div>
     <div class="detail-row"><div class="detail-label">Total</div><div class="detail-val">${parseFloat(tx.amount) + parseFloat(tx.gasFee)} ETH</div></div>
@@ -870,27 +925,354 @@ function showTxDetail(tx) {
 
 // LOAD ATTACK DEMO ───────────────────────────────────────────
 function loadAttack() {
-  
+  if (!activeWallet) return;
+  // Auto-fill fields
+  const fromEl = document.getElementById('integrity-from');
+  if (fromEl) fromEl.value = activeWallet.address;
+
+  // Auto-fill nonce
+  provider.getTransactionCount(activeWallet.address).then(nonce => {
+    const nonceEl = document.getElementById('integrity-nonce');
+    if (nonceEl) nonceEl.value = nonce;
+  });
 }
 
+// ═══════════════════════════════════════════════════════════════
+// 3.4.2 — SIGN ORIGINAL TX (Bước 1 của Integrity Attack)
+// ═══════════════════════════════════════════════════════════════
+let _integritySignature = null;
+let _integrityOriginalData = null;
+
+async function signOriginalTx() {
+  if (!activeWallet) { toast('Vui lòng mở khoá ví trước.', 'error'); return; }
+
+  const to = document.getElementById('integrity-to').value.trim() || '0x000000000000000000000000000000000000dEaD';
+  const amount = parseFloat(document.getElementById('integrity-original-amount').value) || 0.001;
+  let nonce = parseInt(document.getElementById('integrity-nonce').value);
+  if (isNaN(nonce)) nonce = await provider.getTransactionCount(activeWallet.address);
+
+  document.getElementById('integrity-to').value = to;
+  document.getElementById('integrity-nonce').value = nonce;
+
+  const txData = { from: activeWallet.address, to, amount, nonce, chainId: 11155111 };
+  _integrityOriginalData = JSON.stringify(txData);
+
+  _integritySignature = await activeWallet.signMessage(_integrityOriginalData);
+  const hash = ethers.hashMessage(_integrityOriginalData);
+
+  document.getElementById('integrity-signature-display').textContent = _integritySignature;
+  document.getElementById('integrity-hash-display').textContent = hash;
+  document.getElementById('integrity-sign-result').style.display = 'block';
+
+  // Activate step 2
+  const m2 = document.getElementById('integrity-marker-2');
+  if (m2) m2.classList.add('active');
+  const form2 = document.getElementById('integrity-step2-form');
+  if (form2) form2.style.display = 'flex';
+
+  toast('Giao dịch đã được ký thành công!', 'success');
+}
+
+// ═══════════════════════════════════════════════════════════════
+// 3.4.2 — RUN INTEGRITY ATTACK (Bước 2)
+// ═══════════════════════════════════════════════════════════════
+async function runIntegrityAttack() {
+  const resultEl = document.getElementById('integrity-result');
+  const tamperAmount = parseFloat(document.getElementById('integrity-tamper-amount').value);
+
+  if (!activeWallet) { resultEl.innerHTML = '<span style="color:var(--yellow)">⚠ Mở khoá ví trước.</span>'; return; }
+  if (!_integritySignature) { resultEl.innerHTML = '<span style="color:var(--yellow)">⚠ Hãy ký giao dịch ở bước 1 trước.</span>'; return; }
+
+  // Activate step 3 marker
+  const m3 = document.getElementById('integrity-marker-3');
+  if (m3) m3.classList.add('active');
+
+  resultEl.innerHTML = '<span style="color:var(--text3)">⏳ Đang xác minh...</span>';
+
+  const originalHash = ethers.hashMessage(_integrityOriginalData);
+  const original = JSON.parse(_integrityOriginalData);
+
+  // Kẻ tấn công sửa amount
+  const tampered = { ...original, amount: tamperAmount };
+  const tamperedData = JSON.stringify(tampered);
+  const tamperedHash = ethers.hashMessage(tamperedData);
+
+  // Xác minh chữ ký với dữ liệu bị sửa
+  let recoveredAddress, isValid;
+  try {
+    recoveredAddress = ethers.verifyMessage(tamperedData, _integritySignature);
+    isValid = recoveredAddress.toLowerCase() === activeWallet.address.toLowerCase();
+  } catch(e) { isValid = false; recoveredAddress = 'ERROR'; }
+
+  const step = (num, cls, label, val) => `
+    <div class="integrity-step">
+      <div class="step-num ${cls}">${num}</div>
+      <div class="step-content">
+        <div class="step-label">${label}</div>
+        <div class="step-val">${val}</div>
+      </div>
+    </div>`;
+
+  resultEl.innerHTML = `
+    ${step(1, 'ok', '✅ Ký giao dịch gốc (amount = ' + original.amount + ' ETH)', 'Signature: ' + _integritySignature.slice(0,28) + '...')}
+    ${step(2, 'info', '📋 Hash giao dịch gốc', originalHash)}
+    ${step(3, 'fail', '💀 Kẻ tấn công sửa amount → ' + tamperAmount + ' ETH', 'Hash bị sửa: ' + tamperedHash)}
+    ${step(4, isValid ? 'fail' : 'ok',
+      isValid ? '❌ Chữ ký vẫn hợp lệ (lỗi!)' : '🔒 Xác minh: KHÔNG HỢP LỆ',
+      'Recovered: ' + recoveredAddress.slice(0,20) + '...\nWallet: ' + activeWallet.address.slice(0,20) + '...\nKhớp: ' + (isValid ? 'CÓ (lỗi!)' : 'KHÔNG → TỪ CHỐI')
+    )}
+    <div class="conclusion-box ${isValid ? 'fail' : 'success'}">
+      ${isValid ? '⚠️ Phát hiện lỗi bảo mật!' : '✅ KẾT LUẬN: Dữ liệu bị sửa → Hash thay đổi → Chữ ký ECDSA không khớp → Giao dịch bị TỪ CHỐI.'}
+    </div>`;
+
+  if (m3) m3.classList.add(isValid ? 'error' : 'completed');
+}
+
+// ═══════════════════════════════════════════════════════════════
+// 3.4.3 — NONCE: Bước 1 — Gửi giao dịch gốc
+// ═══════════════════════════════════════════════════════════════
+let _lastSignedTxHex = null;
+
+async function nonceStepSendTx() {
+  const to = document.getElementById('nonce-to').value.trim();
+  const amount = document.getElementById('nonce-amount').value.trim();
+  const resultEl = document.getElementById('nonce-step1-result');
+  const btn = document.getElementById('nonce-send-btn');
+
+  if (!activeWallet) { toast('Mở khoá ví trước.', 'error'); return; }
+  if (!ethers.isAddress(to)) { toast('Địa chỉ không hợp lệ.', 'error'); return; }
+  if (!amount || parseFloat(amount) <= 0) { toast('Số tiền không hợp lệ.', 'error'); return; }
+
+  btn.disabled = true;
+  btn.querySelector('span:last-child').textContent = '⏳ Đang gửi...';
+  resultEl.style.display = 'none';
+
+  try {
+    const nonce = await provider.getTransactionCount(activeWallet.address);
+    const feeData = await provider.getFeeData();
+    const gasLimit = await provider.estimateGas({
+      from: activeWallet.address, to, value: ethers.parseEther(amount)
+    });
+
+    const tx = {
+      to, value: ethers.parseEther(amount), nonce, gasLimit,
+      maxFeePerGas: feeData.maxFeePerGas,
+      maxPriorityFeePerGas: feeData.maxPriorityFeePerGas,
+      chainId: 11155111
+    };
+
+    const signedTx = await activeWallet.signTransaction(tx);
+    _lastSignedTxHex = signedTx;
+
+    const data = await api('/transaction/send', { method: 'POST', body: JSON.stringify({ signedTx }) });
+    const hash = data.result.hash;
+
+    resultEl.style.display = 'block';
+    resultEl.innerHTML = `
+      <div class="sign-result-item">
+        <div class="sign-result-label">✅ Giao dịch đã broadcast</div>
+        <div class="sign-result-value">Hash: ${hash}</div>
+      </div>
+      <div class="sign-result-item">
+        <div class="sign-result-label">📋 Nonce sử dụng</div>
+        <div class="sign-result-value">${nonce}</div>
+      </div>
+      <div class="sign-result-item">
+        <div class="sign-result-label">🔑 Signed TX Hex (đã tự động điền vào bước 2)</div>
+        <div class="sign-result-value" style="max-height:60px;overflow:auto">${signedTx.slice(0,80)}...</div>
+      </div>`;
+
+    // Auto-fill vào bước 2
+    document.getElementById('replay-signed-transaction').value = signedTx;
+    const m2 = document.getElementById('nonce-marker-2');
+    if (m2) m2.classList.add('active');
+
+    toast('Giao dịch gốc đã gửi! Nonce=' + nonce, 'success');
+  } catch (e) {
+    resultEl.style.display = 'block';
+    resultEl.innerHTML = `<div style="color:var(--red)">✗ Lỗi: ${e.message}</div>`;
+    resultEl.style.borderColor = 'rgba(255,77,109,0.25)';
+  } finally {
+    btn.disabled = false;
+    btn.querySelector('span:last-child').textContent = 'Gửi giao dịch gốc';
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// 3.4.3 — REPLAY ATTACK (Bước 2)
+// ═══════════════════════════════════════════════════════════════
 async function runReplayAttack() {
   const signedTx = document.getElementById('replay-signed-transaction').value.trim();
+  const resultEl = document.getElementById('ra-result');
+  const m3 = document.getElementById('nonce-marker-3');
+
   if (!signedTx) {
-    document.getElementById('ra-result').textContent = 'Please enter signed transaction data';
+    resultEl.innerHTML = '<span style="color:var(--yellow)">⚠ Dán signed transaction hex vào ô trên hoặc gửi giao dịch gốc ở bước 1.</span>';
     return;
   }
+
+  if (m3) m3.classList.add('active');
+  resultEl.innerHTML = '<span style="color:var(--text3)">⏳ Đang phát lại giao dịch...</span>';
+
   try {
+    const data = await api('/transaction/send', { method: 'POST', body: JSON.stringify({ signedTx }) });
+    const result = data.result;
+    if (m3) m3.classList.add('error');
+    resultEl.innerHTML = `<div class="conclusion-box fail">⚠ Giao dịch được chấp nhận! Hash: ${result.hash.slice(0,20)}...\n→ Nonce chưa bị dùng. Thử lại với signedTx đã broadcast.</div>`;
+  } catch (e) {
+    if (m3) m3.classList.add('completed');
+    resultEl.innerHTML = `
+      <div class="integrity-step">
+        <div class="step-num ok">✓</div>
+        <div class="step-content">
+          <div class="step-label">✅ Phòng thủ Replay Attack thành công!</div>
+          <div class="step-val">Mạng từ chối: ${e.message}</div>
+        </div>
+      </div>
+      <div class="conclusion-box success">✅ KẾT LUẬN: Nonce trong signedTx đã bị dùng → Ethereum node từ chối giao dịch trùng lặp → Replay Attack thất bại.</div>`;
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// 3.4.4 — RACE ATTACK / PENDING STATE MONITOR
+// Gửi giao dịch thật → Theo dõi trạng thái pending real-time
+// UI cảnh báo → ngăn người dùng giao dịch vội (Race Attack defense)
+// ═══════════════════════════════════════════════════════════════
+let _racePollingTimer = null;
+
+async function runRaceAttackDemo() {
+  const to       = document.getElementById('race-to').value.trim();
+  const amount   = document.getElementById('race-amount').value.trim();
+  const resultEl = document.getElementById('race-result');
+  const btn      = document.getElementById('race-send-btn');
+
+  if (!activeWallet) {
+    resultEl.innerHTML = '<span style="color:var(--yellow)">⚠ Vui lòng mở khoá ví trước.</span>';
+    return;
+  }
+  if (!ethers.isAddress(to)) {
+    resultEl.innerHTML = '<span style="color:var(--red)">✗ Địa chỉ người nhận không hợp lệ.</span>';
+    return;
+  }
+  if (!amount || parseFloat(amount) <= 0) {
+    resultEl.innerHTML = '<span style="color:var(--red)">✗ Số lượng ETH không hợp lệ.</span>';
+    return;
+  }
+
+  // Dừng polling cũ nếu có
+  if (_racePollingTimer) { clearInterval(_racePollingTimer); _racePollingTimer = null; }
+
+  btn.disabled = true;
+  btn.querySelector('span:last-child').textContent = '⏳ Đang gửi...';
+  resultEl.innerHTML = '<span style="color:var(--text3)">📡 Đang ký và phát sóng giao dịch...</span>';
+
+  let txHash = null;
+  let startTime = Date.now();
+
+  try {
+    // Lấy nonce & fee data
+    const nonce    = await provider.getTransactionCount(activeWallet.address);
+    const feeData  = await provider.getFeeData();
+    const gasLimit = await provider.estimateGas({
+      from: activeWallet.address, to,
+      value: ethers.parseEther(amount)
+    });
+
+    const tx = {
+      to,
+      value: ethers.parseEther(amount),
+      nonce,
+      gasLimit,
+      maxFeePerGas: feeData.maxFeePerGas,
+      maxPriorityFeePerGas: feeData.maxPriorityFeePerGas,
+      chainId: 11155111
+    };
+
+    const signedTx = await activeWallet.signTransaction(tx);
+
+    // Broadcast
     const data = await api('/transaction/send', {
       method: 'POST',
       body: JSON.stringify({ signedTx })
     });
-    result = data.result;
-    document.getElementById('ra-result').textContent = `Attack successful! New transaction hash: ${result.hash}`;
-    document.getElementById('ra-result').style.color = 'green';
-  } catch (e) {
-    document.getElementById('ra-result').textContent = `Attack failed: ${e.message}`;
-    document.getElementById('ra-result').style.color = 'red';
+
+    txHash = data.result.hash;
+    startTime = Date.now();
+
+    resultEl.innerHTML = `<span style="color:var(--green)">✅ Giao dịch đã broadcast! Hash: <a href="https://sepolia.etherscan.io/tx/${txHash}" target="_blank" style="color:var(--accent)">${txHash.slice(0,22)}...</a></span>`;
+
+    // Hiển thị pending card ngay lập tức
+    _updatePendingMonitor(txHash, to, amount, nonce, 'pending', startTime);
+
+    // Hiện cảnh báo Race Attack
+    document.getElementById('race-warning').style.display = 'flex';
+
+    // ── Bắt đầu polling mỗi 5 giây ──
+    _racePollingTimer = setInterval(async () => {
+      try {
+        const receipt = await provider.getTransactionReceipt(txHash);
+        const elapsed = Math.round((Date.now() - startTime) / 1000);
+
+        if (receipt) {
+          clearInterval(_racePollingTimer);
+          _racePollingTimer = null;
+          const confirmed = receipt.status === 1;
+          _updatePendingMonitor(txHash, to, amount, nonce,
+            confirmed ? 'confirmed' : 'failed', startTime);
+          document.getElementById('race-warning').style.display = 'none';
+          document.getElementById('pending-dot').className = 'pending-dot ' + (confirmed ? 'confirmed' : '');
+          btn.disabled = false;
+          btn.querySelector('span:last-child').textContent = 'Gửi & Monitor Pending';
+          resultEl.innerHTML = `<span style="color:${confirmed ? 'var(--green)' : 'var(--red)'}">
+            ${confirmed ? '✅' : '❌'} Giao dịch ${confirmed ? 'xác nhận thành công' : 'thất bại'} sau ${elapsed}s. 
+            Block #${receipt.blockNumber}</span>`;
+        } else {
+          // Vẫn pending → cập nhật timer
+          _updatePendingMonitor(txHash, to, amount, nonce, 'pending', startTime);
+        }
+      } catch(e) {
+        // Bỏ qua lỗi mạng tạm thời
+      }
+    }, 5000);
+
+  } catch(e) {
+    resultEl.innerHTML = `<span style="color:var(--red)">✗ Lỗi: ${e.message}</span>`;
+    btn.disabled = false;
+    btn.querySelector('span:last-child').textContent = 'Gửi & Monitor Pending';
   }
+}
+
+function _updatePendingMonitor(hash, to, amount, nonce, status, startTime) {
+  const dot = document.getElementById('pending-dot');
+  const listEl = document.getElementById('pending-tx-list');
+
+  dot.className = 'pending-dot' + (status === 'pending' ? ' active' : status === 'confirmed' ? ' confirmed' : '');
+
+  const elapsed = Math.round((Date.now() - startTime) / 1000);
+  const badgeLabel = status === 'pending' ? '⏳ PENDING' : status === 'confirmed' ? '✅ CONFIRMED' : '❌ FAILED';
+
+  listEl.innerHTML = `
+    <div class="pending-tx-card status-${status}">
+      <div class="ptx-header">
+        <span class="ptx-badge ${status}">${badgeLabel}</span>
+        <a href="https://sepolia.etherscan.io/tx/${hash}" target="_blank"
+           style="font-size:10px;color:var(--accent);font-family:var(--mono)">Etherscan ↗</a>
+      </div>
+      <div class="ptx-hash">${hash.slice(0,30)}...</div>
+      <div class="ptx-row"><span class="ptx-label">To:</span><span class="ptx-val">${to.slice(0,18)}...</span></div>
+      <div class="ptx-row"><span class="ptx-label">Amount:</span><span class="ptx-val">${amount} ETH</span></div>
+      <div class="ptx-row"><span class="ptx-label">Nonce:</span><span class="ptx-val">${nonce}</span></div>
+      <div class="ptx-timer ${status !== 'pending' ? 'done' : ''}">
+        ${status === 'pending'
+          ? `⏱ Đã chờ: ${elapsed}s — Mạng đang xử lý...`
+          : `✓ Hoàn thành sau ${elapsed}s`}
+      </div>
+      ${status === 'pending' ? `
+      <div style="margin-top:8px;font-size:10px;color:var(--red);font-family:var(--sans)">
+        🛡 Cảnh báo Race Attack: Không gửi thêm TX với cùng Nonce ${nonce} trong lúc này!
+      </div>` : ''}
+    </div>
+  `;
 }
 
 // ── MULTI-ACCOUNT ───────────────────────────────────────
@@ -976,6 +1358,7 @@ async function selectAccount(index) {
   activeWallet = allWallets[activeWalletIndex];
   saveSession(activeWallet, activeWalletIndex);
   showWallet(activeWallet);
+  document.querySelector(".tab[data-tab='tokens']").click();
 }
 
 async function addNewAccount() {

@@ -269,7 +269,7 @@ router.get('/transaction/history/:address', async (req, res) => {
           from: tx.from,
           to: tx.to,
           amount: tx.value.toString(),
-          type: tx.from.toLowerCase() === address.toLowerCase() ? "out" : "in",
+          type: tx.type,
           status: "success",
           timestamp: tx.metadata?.blockTimestamp
             ? new Date(tx.metadata.blockTimestamp).getTime()

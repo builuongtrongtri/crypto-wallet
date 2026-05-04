@@ -32,17 +32,23 @@ async function getTransactions(address) {
     })
   ]);
 
-  const inTxs = inRes.data.result?.transfers || [];
-  const outTxs = outRes.data.result?.transfers || [];
+  const inTxs = (inRes.data.result?.transfers || []).map(tx => ({
+    ...tx,
+    type: "in"
+  }));
+
+  const outTxs = (outRes.data.result?.transfers || []).map(tx => ({
+    ...tx,
+    type: "out"
+  }));
 
   const allTxs = [...inTxs, ...outTxs];
 
-  return allTxs
-    .sort((a, b) => {
-      const t1 = new Date(a.metadata?.blockTimestamp || 0).getTime();
-      const t2 = new Date(b.metadata?.blockTimestamp || 0).getTime();
-      return t2 - t1;
-    });
+  return allTxs.sort((a, b) => {
+    const t1 = new Date(a.metadata?.blockTimestamp || 0).getTime();
+    const t2 = new Date(b.metadata?.blockTimestamp || 0).getTime();
+    return t2 - t1;
+  });
 }
 
 async function getGasFeeTransaction(txHash) {
