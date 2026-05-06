@@ -212,12 +212,8 @@ async function showWallet(wallet) {
   document.getElementById('hdr-address').textContent = `Address: ${wallet.address}`;
   document.getElementById('hdr-pubkey').textContent = `Public key: ${wallet.publicKey}`;
 
-  await refreshBalance();
-  loadTokens();
+  refreshAll();
   renderSidebar();
-  // renderQuickWallets();
-  // loadHistory();
-  // loadPending();
 }
 
 function showMnemonicDisplay(mnemonic, address) {
@@ -732,7 +728,7 @@ async function pollPendingTransactionStatus(txHash) {
         pendingPollingTimer = null;
         currentPendingTx = null;
         renderHistoryWithPending();
-        refreshBalance();
+        refreshAll();
         toast(`Transaction ${receipt.status === 1 ? 'confirmed' : 'failed'} on blockchain.`, receipt.status === 1 ? 'success' : 'error');
       }
     } catch (err) {
@@ -1392,7 +1388,6 @@ async function refreshAll() {
     if (activeWallet) {
       await refreshBalance();
       renderSidebar();
-      await renderTokens();
     }
     
   } catch (e) {
