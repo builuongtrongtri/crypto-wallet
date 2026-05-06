@@ -1388,6 +1388,7 @@ async function refreshAll() {
     if (activeWallet) {
       await refreshBalance();
       renderSidebar();
+      loadTokens();
     }
     
   } catch (e) {
