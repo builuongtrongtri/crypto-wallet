@@ -653,6 +653,7 @@ async function sendTransaction() {
     });
 
     const result = data.result;
+    console.log('Transaction sent:', result);
     const txHash = result.hash;
     const feePrice = feeData.maxFeePerGas || feeData.gasPrice;
     const estimatedFee = feePrice ? ethers.formatEther(gasLimit * feePrice) : '0';
