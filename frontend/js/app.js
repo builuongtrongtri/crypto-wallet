@@ -2,7 +2,7 @@ const provider = new ethers.JsonRpcProvider(
   "https://ethereum-sepolia-rpc.publicnode.com"
 );
 
-const API = 'http://localhost:3000/api';
+const API = 'https://crypto-wallet-9bgw.onrender.com/api';
 let activeWallet = null;
 let activeWalletIndex = 0;
 let walletBalance = 0;
