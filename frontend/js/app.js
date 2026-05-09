@@ -3,7 +3,7 @@ const provider = new ethers.JsonRpcProvider(
 );
 
 // const API = 'http://localhost:3000/api';
-const API = 'https://crypto-wallet-9bgw.onrender.com/api';
+const API = 'https://crypto-wallet-1-ilnn.onrender.com';
 let activeWallet = null;
 let activeWalletIndex = 0;
 let walletBalance = 0;

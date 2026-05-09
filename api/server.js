@@ -14,7 +14,7 @@ async function start() {
   const PORT = process.env.PORT || 3000;
   app.listen(PORT, () => {
     // console.log(`🔐 CryptoWallet running at http://localhost:${PORT}`);
-    console.log(`🔐 CryptoWallet running at https://crypto-wallet-9bgw.onrender.com`);
+    console.log(`🔐 CryptoWallet running at https://crypto-wallet-1-ilnn.onrender.com`);
     console.log(`📡 Connected to Sepolia Testnet`);
   });
 }
