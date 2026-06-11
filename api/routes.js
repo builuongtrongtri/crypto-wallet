@@ -1,13 +1,13 @@
 const express = require('express');
 const router = express.Router();
-const { createWallet, getEthBalance, importWalletFromMnemonic } = require('../ethereum/wallet');
+const { createWallet, getEthBalance, getTokenBalance, importWalletFromMnemonic } = require('../ethereum/wallet');
 const { broadcastTransaction } = require('../ethereum/transaction');
 const { provider } = require('../ethereum/provider');
 const { ethers } = require('ethers');
 const { encryptMnemonic, decryptMnemonic } = require('../core/crypto');
 const crypto = require('crypto');
 const { getMarketData } = require('../ethereum/token');
-const { getTransactions, getGasFeeTransaction } = require('../ethereum/scanner');
+const { getTransactions, getGasFeeTransaction, normalizeHistoryTransaction } = require('../ethereum/scanner');
 
 // ── TOKENS ──────────────────────────────────────────────
 router.get('/tokens/market', async (req, res) => {
@@ -99,22 +99,8 @@ router.post('/wallet/import', async (req, res) => {
     if (!privateKey) return res.status(400).json({ error: 'Private key required' });
     if (!password) return res.status(400).json({ error: 'Password required' });
     
-    // Use ethers.js to get wallet from private key
-    const wallet = new ethers.Wallet(privateKey);
-    const address = wallet.address;
-
-    const key = crypto.scryptSync(password, "salt", 32);
-    const iv = crypto.randomBytes(16);
-
-    const cipher = crypto.createCipheriv("aes-256-cbc", key, iv);
-    let encrypted = cipher.update(privateKey, "utf8", "hex");
-    encrypted += cipher.final("hex");
-
-    await Wallet.create({
-      address: address,
-      encryptedPrivateKey: encrypted,
-      iv: iv.toString("hex")
-    });
+    const { importFromPrivateKey } = require('../core/wallet');
+    const { address } = await importFromPrivateKey(privateKey, password);
 
     res.json({ address: address });
   } catch (e) {
@@ -128,15 +114,8 @@ router.post('/wallet/mnemonic', async (req, res) => {
     const { address, password } = req.body;
     if (!address || !password) return res.status(400).json({ error: 'Address and password required' });
     
-    const walletDoc = await Wallet.findOne({ address });
-    if (!walletDoc || !walletDoc.encryptedMnemonic) {
-      return res.status(400).json({ error: 'Wallet not found or mnemonic not available' });
-    }
-
-    const key = crypto.scryptSync(password, "salt", 32);
-    const decipher = crypto.createDecipheriv("aes-256-cbc", key, Buffer.from(walletDoc.iv, "hex"));
-    let mnemonic = decipher.update(walletDoc.encryptedMnemonic, "hex", "utf8");
-    mnemonic += decipher.final("utf8");
+    const { revealMnemonic } = require('../core/wallet');
+    const mnemonic = revealMnemonic(address, password);
 
     res.json({ mnemonic });
   } catch (e) {
@@ -202,11 +181,25 @@ router.get('/wallet/:address/eth-balance', async (req, res) => {
   }
 });
 
+router.get('/wallet/:address/token-balance', async (req, res) => {
+  try {
+    const { tokenAddress } = req.query;
+    const balance = await getTokenBalance(req.params.address, tokenAddress);
+    res.json({ 
+      address: req.params.address, 
+      tokenAddress: tokenAddress,
+      balance: balance
+    });
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
 
 // ── TRANSACTIONS ────────────────────────────────────────
 router.post('/transaction/gas-fee', async (req, res) => {
   try {
-    const { from, to, amount } = req.body;
+    const { from, to, amount, data } = req.body;
 
     const feeData = await provider.getFeeData();
 
@@ -219,7 +212,8 @@ router.post('/transaction/gas-fee', async (req, res) => {
     const gasLimit = await provider.estimateGas({
       from,
       to,
-      value: ethers.parseEther(String(amount))
+      value: data && data !== "0x" ? 0n : ethers.parseEther(String(amount || 0)),
+      data: data || "0x"
     });
 
     const fee = gasLimit * gasPrice;
@@ -264,18 +258,23 @@ router.get('/transaction/history/:address', async (req, res) => {
         const gasPrice = BigInt(receipt.effectiveGasPrice || receipt.gasPrice);
         const totalFee = gasUsed * gasPrice;
 
-        return {
-          hash: tx.hash,
-          from: tx.from,
-          to: tx.to,
-          amount: tx.value.toString(),
-          type: tx.type,
-          status: "success",
-          timestamp: tx.metadata?.blockTimestamp
-            ? new Date(tx.metadata.blockTimestamp).getTime()
-            : Date.now(),
-          gasFee: ethers.formatEther(totalFee)
-        };
+        return normalizeHistoryTransaction(
+          {
+            ...tx,
+            amount: tx.amount ?? tx.value ?? '0',
+            amountOut: tx.amountOut ?? tx.value ?? '0',
+            tokenIn: tx.tokenIn || tx.asset || 'ETH',
+            tokenOut: tx.tokenOut || tx.asset || 'ETH',
+            asset: tx.asset || tx.tokenIn || 'ETH',
+            type: tx.type || 'transfer',
+            status: 'success',
+            timestamp: tx.metadata?.blockTimestamp
+              ? new Date(tx.metadata.blockTimestamp).getTime()
+              : Date.now(),
+            gasFee: ethers.formatEther(totalFee)
+          },
+          ethers.formatEther(totalFee)
+        );
       }));
       
     res.json({ address: address, transactions: txList });

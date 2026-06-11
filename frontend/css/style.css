@@ -275,6 +275,34 @@ html, body { height: 100%; background: var(--bg); color: var(--text); font-famil
 .tab-content { display: none; }
 .tab-content.active { display: block; }
 
+/* Swap form */
+#swap-token-in, 
+#swap-token-out {
+  border: none; 
+  background: transparent; 
+  color: inherit; 
+  cursor: pointer; 
+  outline: none; 
+  padding-right: 10px;
+}
+
+/* Swap form */
+.swap-form {
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 28px;
+  max-width: 560px;
+  margin-bottom: 24px;
+}
+
+.swap-form h2, .tab-content > h2 {
+  font-size: 20px;
+  font-weight: 800;
+  margin-bottom: 20px;
+  color: var(--text);
+}
+
 /* Send form */
 .send-form {
   background: var(--bg2);
@@ -493,9 +521,9 @@ html, body { height: 100%; background: var(--bg); color: var(--text); font-famil
 }
 .tx-icon.out { background: var(--red-dim); }
 .tx-icon.in { background: var(--green-dim); }
+.tx-icon.swap { background: linear-gradient(135deg, rgba(124, 106, 255, 0.18), rgba(167, 139, 255, 0.12)); }
 .tx-icon.pending { background: rgba(255,209,102,0.1); }
 
-.tx-info {}
 .tx-parties { font-family: var(--mono); font-size: 11px; color: var(--text2); margin-bottom: 3px; }
 .tx-time { font-size: 11px; color: var(--text3); }
 
@@ -503,7 +531,9 @@ html, body { height: 100%; background: var(--bg); color: var(--text); font-famil
 .tx-amount-val { font-family: var(--mono); font-weight: 700; font-size: 15px; }
 .tx-amount-val.out { color: var(--red); }
 .tx-amount-val.in { color: var(--green); }
+.tx-amount-val.swap { color: var(--accent2); }
 .tx-status { font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; margin-top: 3px; }
+.tx-status.swap { color: var(--accent2); }
 .tx-status.confirmed { color: var(--green); }
 
 /* Token List */
@@ -538,6 +568,24 @@ html, body { height: 100%; background: var(--bg); color: var(--text); font-famil
   border-radius: 50%;
   object-fit: cover;
   flex-shrink: 0;
+}
+
+/* Swap token select wrapper */
+.token-select {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  padding: 6px 8px;
+  border-radius: 10px;
+}
+
+.token-icon-small {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  object-fit: cover;
 }
 
 .token-info {

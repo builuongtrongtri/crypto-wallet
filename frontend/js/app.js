@@ -2,13 +2,42 @@ const provider = new ethers.JsonRpcProvider(
   "https://ethereum-sepolia-rpc.publicnode.com"
 );
 
-// const API = 'http://localhost:3000/api';
-const API = 'https://crypto-wallet-1-ilnn.onrender.com/api';
+const API = 'http://localhost:3000/api';
+// const API = 'https://crypto-wallet-1-ilnn.onrender.com/api';
 let activeWallet = null;
 let activeWalletIndex = 0;
-let walletBalance = 0;
+let walletBalanceUSD = 0;
 let allWallets = [];
 let lastTxRef = null;
+let tokens = [
+  {
+    name: 'Ethereum',
+    symbol: 'ETH',
+    address: '0xDa6F7b67eCBd74fecF96Eb40f24BDdFf1b460465',
+    icon: 'https://assets.coingecko.com/coins/images/279/thumb/ethereum.png',
+    decimals: 18,
+    badge: 'Earn',
+    balance: 0,
+  },
+  {
+    name: 'USD Coin',
+    symbol: 'USDC',
+    address: '0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238',
+    icon: 'https://assets.coingecko.com/coins/images/6319/thumb/USD_Coin_icon.png',
+    decimals: 6,
+    badge: 'Stablecoin',
+    balance: 0,
+  },
+  {
+    name: 'Chainlink',
+    symbol: 'LINK',
+    icon: 'https://assets.coingecko.com/coins/images/877/thumb/chainlink-new-logo.png',
+    address: '0x779877A7B0D9E8603169DdbD7836e478b4624789',
+    decimals: 18,
+    badge: '',
+    balance: 0,
+  },
+];
 
 // ── UTILS ───────────────────────────────────────────────
 function fmt(addr) { return addr ? addr.slice(0, 10) + '...' + addr.slice(-6) : '—'; }
@@ -49,7 +78,7 @@ function showCreateWalletScreen() {
 function openModal(id) {
   document.getElementById('modal-overlay').classList.add('active');
   document.getElementById(id).classList.add('active');
-  
+
   // Initialize mnemonic input grid when import modal is opened
   if (id === 'import-wallet-modal') {
     buildMnemonicInputGrid(12);
@@ -170,12 +199,12 @@ async function unlockWallet() {
       return;
     }
 
-    const data = await api('/wallet/unlock', { 
-      method: 'POST', 
-      body: JSON.stringify({ 
+    const data = await api('/wallet/unlock', {
+      method: 'POST',
+      body: JSON.stringify({
         password: pw,
         vault: walletData
-      }) 
+      })
     });
     activeWallet = ethers.Wallet.fromPhrase(data.mnemonic);
     await reloadWallets();
@@ -289,6 +318,10 @@ async function importFromMnemonic() {
   if (!password) { errEl.textContent = 'Password required'; return; }
 
   try {
+    const btn = document.querySelector('#import-tab-mnemonic > button');
+    btn.textContent = 'Importing...';
+    btn.disabled = true;
+
     const data = await api('/wallet/import/mnemonic', {
       method: 'POST',
       body: JSON.stringify({ mnemonic: mnemonic, password: password })
@@ -311,6 +344,8 @@ async function importFromMnemonic() {
     showWallet(data.address);
     toast(`Wallet imported!`, 'success');
     document.getElementById('import-mnemonic-password').value = '';
+    btn.textContent = 'Import from Phrase';
+    btn.disabled = false;
   } catch (e) {
     errEl.textContent = "Invalid mnemonic or error importing wallet";
   }
@@ -375,12 +410,12 @@ async function revealMnemonic() {
       return;
     }
 
-    const data = await api('/wallet/unlock', { 
-      method: 'POST', 
-      body: JSON.stringify({ 
+    const data = await api('/wallet/unlock', {
+      method: 'POST',
+      body: JSON.stringify({
         password: pw,
         vault: walletData
-      }) 
+      })
     });
 
     toast('Mnemonic revealed! Handle with care.', 'success');
@@ -419,12 +454,12 @@ async function revealPrivateKey() {
       return;
     }
 
-    const data = await api('/wallet/unlock', { 
-      method: 'POST', 
-      body: JSON.stringify({ 
+    const data = await api('/wallet/unlock', {
+      method: 'POST',
+      body: JSON.stringify({
         password: pw,
         vault: walletData
-      }) 
+      })
     });
     toast('Private key revealed! Handle with care.', 'success');
     const privateKey = activeWallet.privateKey;
@@ -450,12 +485,6 @@ function copyAddress() {
 async function refreshBalance() {
   if (!activeWallet) return;
   try {
-    const data = await api(`/wallet/${activeWallet.address}/eth-balance`);
-    const marketData = await api('/tokens/market');
-    const ethPriceUSD = marketData.eth.priceUSD;
-    const walletBalanceUSD = data.balance * ethPriceUSD;
-    walletBalance = walletBalanceUSD;
-
     document.getElementById('hdr-balance').textContent = '$' + parseFloat(walletBalanceUSD).toFixed(2);
     // if (data.pendingOut > 0) {
     //   document.getElementById('hdr-pending').textContent = `−${data.pendingOut.toFixed(4)} CVT pending`;
@@ -478,7 +507,7 @@ function renderSidebar() {
   for (let i = 0; i < allWallets.length; i++) {
     const w = allWallets[i];
     const isActive = (i === activeWalletIndex);
-    let balStr = isActive ? `$${parseFloat(walletBalance).toFixed(2)}` : "Loading...";
+    let balStr = isActive ? `$${parseFloat(walletBalanceUSD).toFixed(2)}` : "Loading...";
     html += `
       <div class="sidebar-wallet-item ${isActive ? 'active' : ''}" onclick="selectAccount(${i})">
         <div class="sw-label">Account ${i + 1}</div>
@@ -491,18 +520,9 @@ function renderSidebar() {
 
   // Load balances for inactive accounts
   for (let i = 0; i < allWallets.length; i++) {
-    if (i !== activeWalletIndex) {
       const w = allWallets[i];
-      api(`/wallet/${w.address}/eth-balance`).then(async data => {
-        const marketData = await api('/tokens/market');
-        const balUSD = data.balance * marketData.eth.priceUSD;
-        const balEl = document.getElementById(`sidebar-bal-${i}`);
-        if (balEl) balEl.textContent = `$${parseFloat(balUSD).toFixed(2)}`;
-      }).catch(e => {
-        const balEl = document.getElementById(`sidebar-bal-${i}`);
-        if (balEl) balEl.textContent = `Error`;
-      });
-    }
+      const balEl = document.getElementById(`sidebar-bal-${i}`);
+      balEl.textContent = `$${parseFloat(w.balanceUSD).toFixed(2)}`;
   }
 }
 
@@ -522,6 +542,39 @@ function renderSidebar() {
 let pendingTx = null;
 let currentPendingTx = null;
 let pendingPollingTimer = null;
+let swapHistory = loadSwapHistory();
+
+function loadSwapHistory() {
+  try {
+    return JSON.parse(localStorage.getItem('swap_history') || '[]');
+  } catch {
+    return [];
+  }
+}
+
+function saveSwapHistory() {
+  try {
+    localStorage.setItem('swap_history', JSON.stringify(swapHistory));
+  } catch (err) {
+    console.error('Unable to save swap history', err);
+  }
+}
+
+function addSwapHistoryEntry(entry) {
+  swapHistory = [entry, ...swapHistory.filter((item) => item.hash !== entry.hash)].slice(0, 50);
+  saveSwapHistory();
+}
+
+function updateSwapHistoryStatus(hash, status) {
+  const idx = swapHistory.findIndex((item) => item.hash === hash);
+  if (idx === -1) return;
+  swapHistory[idx].status = status;
+  saveSwapHistory();
+}
+
+function getSwapHistoryEntries() {
+  return swapHistory;
+}
 
 function isValidAddress(address) {
   return ethers.isAddress(address);
@@ -545,6 +598,17 @@ const errEl = document.getElementById('send-error');
 toInput.addEventListener('input', validateForm);
 amountInput.addEventListener('input', validateForm);
 
+function getSelectedSendToken() {
+  const sel = document.getElementById('send-token');
+  if (!sel) return { symbol: 'ETH', decimals: 18 };
+  const opt = sel.options[sel.selectedIndex];
+  return {
+    symbol: opt.dataset.symbol || opt.value,
+    address: opt.dataset.address,
+    decimals: parseInt(opt.dataset.decimals || '18', 10)
+  };
+}
+
 function validateForm() {
   const to = toInput.value.trim();
   const amount = amountInput.value;
@@ -564,13 +628,18 @@ function validateForm() {
     return false;
   }
 
-  if (amount >= walletBalance) {
+  const token = getSelectedSendToken();
+  const t = tokens.find(x => x.symbol === token.symbol);
+  const balance = t ? t.balance : 0;
+
+  const amountParsed = parseFloat(amount);
+  if (amountParsed > balance) {
     errEl.textContent = 'Insufficient balance';
     return false;
   }
 
   try {
-    if (ethers.parseEther(amount) <= 0n) {
+    if (ethers.parseUnits(amount, token.decimals) <= 0n) {
       errEl.textContent = 'Invalid amount';
       return false;
     }
@@ -586,20 +655,37 @@ function validateForm() {
 async function prepareSendReview() {
   if (!validateForm()) return;
   const to = document.getElementById('send-to').value.trim();
-  const amount = parseFloat(document.getElementById('send-amount').value);
+  const amount = document.getElementById('send-amount').value;
+  const token = getSelectedSendToken();
 
-  pendingTx = { to, amount };
+  pendingTx = { to, amount, token };
 
   document.querySelector('.send-form').classList.add('hidden');
   document.getElementById('send-review').style.display = 'block';
+  document.getElementById('send-review').scrollIntoView({ behavior: 'smooth', block: 'start' });
   document.getElementById('review-from').textContent = activeWallet.address;
   document.getElementById('review-to').textContent = to;
-  document.getElementById('review-amount').textContent = `${amount.toFixed(4)} ETH`;
+  document.getElementById('review-amount').textContent = `${parseFloat(amount).toFixed(4)} ${token.symbol}`;
 
   try {
+    let payload = "0x";
+    let targetAddr = to;
+    if (token.symbol !== 'ETH' && token.address) {
+      const abi = ["function transfer(address to, uint256 amount) returns (bool)"];
+      const iface = new ethers.Interface(abi);
+      const parsedAmount = ethers.parseUnits(amount, token.decimals);
+      payload = iface.encodeFunctionData("transfer", [to, parsedAmount]);
+      targetAddr = token.address;
+    }
+
     const data = await api('/transaction/gas-fee', {
       method: 'POST',
-      body: JSON.stringify({ from: activeWallet.address, to, amount })
+      body: JSON.stringify({
+        from: activeWallet.address,
+        to: targetAddr,
+        amount: token.symbol === 'ETH' ? amount : "0",
+        data: payload
+      })
     });
 
     document.getElementById('review-fee').textContent = `${data.fee} ETH`;
@@ -623,20 +709,36 @@ function activateTab(tabName) {
 }
 
 async function sendTransaction() {
-  const to = document.getElementById('review-to').textContent.trim();
-  const amount = document.getElementById('review-amount').textContent.replace("ETH", "").trim();
+  const to = pendingTx.to;
+  const amount = pendingTx.amount;
+  const token = pendingTx.token;
+
+  let txTo = to;
+  let txValue = ethers.parseEther(amount);
+  let txData = "0x";
+
+  if (token.symbol !== 'ETH' && token.address) {
+    txTo = token.address;
+    txValue = 0n;
+    const abi = ["function transfer(address to, uint256 amount) returns (bool)"];
+    const iface = new ethers.Interface(abi);
+    const parsedAmount = ethers.parseUnits(amount, token.decimals);
+    txData = iface.encodeFunctionData("transfer", [to, parsedAmount]);
+  }
 
   const nonce = await provider.getTransactionCount(activeWallet.address);
   const feeData = await provider.getFeeData();
   const gasLimit = await provider.estimateGas({
     from: activeWallet.address,
-    to,
-    value: ethers.parseEther(amount)
+    to: txTo,
+    value: txValue,
+    data: txData
   });
 
   const tx = {
-    to,
-    value: ethers.parseEther(amount),
+    to: txTo,
+    value: txValue,
+    data: txData,
     nonce,
     gasLimit,
     maxFeePerGas: feeData.maxFeePerGas,
@@ -664,6 +766,7 @@ async function sendTransaction() {
       from: activeWallet.address,
       to,
       amount,
+      asset: token.symbol,
       type: 'out',
       status: 'pending',
       timestamp: Date.now(),
@@ -696,23 +799,44 @@ async function renderHistoryWithPending() {
 
   try {
     const data = await api(`/transaction/history/${activeWallet.address}`);
-    const txItems = [];
+    const backendTxs = (data.transactions || []).map(tx => ({ ...tx, source: 'backend' }));
+    const localSwaps = getSwapHistoryEntries().map(tx => ({ ...tx, source: 'swap' }));
+
+    const allTxs = [];
+    const swapHashes = new Set();
 
     if (currentPendingTx) {
       currentPendingTx.from = currentPendingTx.from.toLowerCase();
       currentPendingTx.to = currentPendingTx.to.toLowerCase();
-      txItems.push(renderTxItem(currentPendingTx));
+      allTxs.push(currentPendingTx);
+      swapHashes.add(currentPendingTx.hash);
     }
 
-    if (!data.transactions || !data.transactions.length) {
-      if (!txItems.length) {
-        el.innerHTML = '<div style="color:var(--text3);font-size:13px;padding:20px">No transactions yet.</div>';
-        return;
+    for (const tx of localSwaps) {
+      if (!swapHashes.has(tx.hash)) {
+        allTxs.push(tx);
+        swapHashes.add(tx.hash);
       }
     }
 
-    const historyItems = (data.transactions || []).map(tx => renderTxItem(tx));
-    el.innerHTML = [...txItems, ...historyItems].join('');
+    const backendSeenKeys = new Set();
+    for (const tx of backendTxs) {
+      if (swapHashes.has(tx.hash)) continue;
+
+      const key = tx.hash + "_" + (tx.asset || "ETH") + "_" + tx.type;
+      if (!backendSeenKeys.has(key)) {
+        allTxs.push(tx);
+        backendSeenKeys.add(key);
+      }
+    }
+
+    if (!allTxs.length) {
+      el.innerHTML = '<div style="color:var(--text3);font-size:13px;padding:20px">No transactions yet.</div>';
+      return;
+    }
+
+    allTxs.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+    el.innerHTML = allTxs.map(tx => renderTxItem(tx)).join('');
   } catch (e) {
     el.innerHTML = '<div style="color:var(--red)">Error loading history</div>';
   }
@@ -728,10 +852,12 @@ async function pollPendingTransactionStatus(txHash) {
       if (receipt && currentPendingTx && currentPendingTx.hash === txHash) {
         clearInterval(pendingPollingTimer);
         pendingPollingTimer = null;
+        const status = receipt.status === 1 ? 'success' : 'failed';
+        updateSwapHistoryStatus(txHash, status);
         currentPendingTx = null;
         renderHistoryWithPending();
         refreshAll();
-        toast(`Transaction ${receipt.status === 1 ? 'confirmed' : 'failed'} on blockchain.`, receipt.status === 1 ? 'success' : 'error');
+        toast(`Transaction ${status === 'success' ? 'confirmed' : 'failed'} on blockchain.`, status === 'success' ? 'success' : 'error');
       }
     } catch (err) {
       // ignore temporary network errors
@@ -745,110 +871,35 @@ async function pollPendingTransactionStatus(txHash) {
 async function loadTokens() {
   if (!activeWallet) return;
   const el = document.getElementById('token-list');
-  
+
   try {
-    // Get balance from wallet
-    const balanceData = await api(`/wallet/${activeWallet.address}/eth-balance`);
-    const balance = parseFloat(balanceData.balance);
+    const data = await getWalletBalance(activeWallet.address);
+    const tokens = data.tokens;
 
-    // Get price from API
-    const data = await api('/tokens/market');
+    const walletData = await getWallet();
+    if (walletData && walletData.customTokens) {
+      for (const t of walletData.customTokens) {
 
-    // Sample token data - in production, fetch from price API
-    const tokens = [
-      {
-        name: 'Ethereum',
-        symbol: 'ETH',
-        icon: 'https://assets.coingecko.com/coins/images/279/thumb/ethereum.png',
-        price: balance * data.eth.priceUSD,
-        change24h: data.eth.change24h,
-        balance: balance,
-        badge: 'Earn'
-      },
-      {
-        name: 'Solana',
-        symbol: 'SOL',
-        icon: 'https://assets.coingecko.com/coins/images/4128/thumb/solana.png',
-        price: 0 * data.sol.priceUSD,
-        change24h: data.sol.change24h,
-        balance: 0,
-        badge: ''
-      },
-      {
-        name: 'Bitcoin',
-        symbol: 'BTC',
-        icon: 'https://assets.coingecko.com/coins/images/1/thumb/bitcoin.png',
-        price: 0 * data.btc.priceUSD,
-        change24h: data.btc.change24h,
-        balance: 0,
-        badge: 'Native SegWit'
-      },
-      {
-        name: 'Tether',
-        symbol: 'USDT',
-        icon: 'https://assets.coingecko.com/coins/images/325/thumb/Tether.png',
-        price: 0 * data.usdt.priceUSD,
-        change24h: data.usdt.change24h,
-        balance: 0,
-        badge: 'Stablecoin'
-      },
-      {
-        name: 'USD Coin',
-        symbol: 'USDC',
-        icon: 'https://assets.coingecko.com/coins/images/6319/thumb/USD_Coin_icon.png',
-        price: 0 * data.usdc.priceUSD,
-        change24h: data.usdc.change24h,
-        balance: 0,
-        badge: 'Stablecoin'
-      },
-      {
-        name: 'Binance Coin',
-        symbol: 'BNB',
-        icon: 'https://assets.coingecko.com/coins/images/825/thumb/bnb-icon2_2x.png',
-        price: 0 * data.bnb.priceUSD,
-        change24h: data.bnb.change24h,
-        balance: 0,
-        badge: ''
-      },
-      {
-        name: 'Cardano',
-        symbol: 'ADA',
-        icon: 'https://assets.coingecko.com/coins/images/975/thumb/cardano.png',
-        price: 0 * data.ada.priceUSD,
-        change24h: data.ada.change24h,
-        balance: 0,
-        badge: ''
-      },
-      {
-        name: 'XRP',
-        symbol: 'XRP',
-        icon: 'https://assets.coingecko.com/coins/images/44/thumb/xrp-symbol-white-128.png',
-        price: 0 * data.xrp.priceUSD,
-        change24h: data.xrp.change24h,
-        balance: 0,
-        badge: ''
-      },
-      {
-        name: 'Polkadot',
-        symbol: 'DOT',
-        icon: 'https://assets.coingecko.com/coins/images/12171/thumb/polkadot.png',
-        price: 0 * data.dot.priceUSD,
-        change24h: data.dot.change24h,
-        balance: 0,
-        badge: ''
-      },
-      {
-        name: 'Chainlink',
-        symbol: 'LINK',
-        icon: 'https://assets.coingecko.com/coins/images/877/thumb/chainlink-new-logo.png',
-        price: 0 * data.link.priceUSD,
-        change24h: data.link.change24h,
-        balance: 0,
-        badge: ''
+        // Get token balance from wallet
+        const tokenData = await api(`/wallet/${activeWallet.address}/token-balance?tokenAddress=${t.address}`);
+        const tokenBalance = parseFloat(tokenData.balance);
+
+        tokens.push({
+          name: t.symbol,
+          symbol: t.symbol,
+          icon: 'https://assets.coingecko.com/coins/images/279/thumb/ethereum.png',
+          price: tokenBalance * data.usdc.priceUSD,
+          change24h: data.usdc.change24h,
+          balance: tokenBalance,
+          badge: 'Custom'
+        });
       }
-    ];
+    }
 
+    populateTokenSelects(tokens);
     el.innerHTML = tokens.map(token => renderTokenItem(token)).join('');
+    // update swap icons after token list refresh
+    try { updateTokenIcons(); } catch (e) { /* ignore if not ready */ }
   } catch (e) {
     el.innerHTML = '<div style="color:var(--red);padding:20px">Error loading tokens</div>';
   }
@@ -858,7 +909,7 @@ function renderTokenItem(token) {
   const changeClass = token.change24h >= 0 ? 'positive' : 'negative';
   const changeSign = token.change24h >= 0 ? '↑' : '↓';
   const badgeHtml = token.badge ? ` <span class="token-badge">${token.badge}</span>` : '';
-  
+
   return `
     <div class="token-item">
       <img src="${token.icon}" alt="${token.name}" class="token-icon">
@@ -874,16 +925,88 @@ function renderTokenItem(token) {
   `;
 }
 
+// ── Swap token icons helpers ─────────────────────────────
+function getTokenIcon(symbol) {
+  if (!symbol) return 'https://assets.coingecko.com/coins/images/279/thumb/ethereum.png';
+  const s = String(symbol).toUpperCase();
+  if (s === 'ETH' || s === 'ETHEREUM') return 'https://assets.coingecko.com/coins/images/279/thumb/ethereum.png';
+  if (s === 'USDC') return 'https://assets.coingecko.com/coins/images/6319/thumb/USD_Coin_icon.png';
+  if (s === 'LINK') return 'https://assets.coingecko.com/coins/images/877/thumb/chainlink-new-logo.png';
+  // fallback
+  return 'https://assets.coingecko.com/coins/images/279/thumb/ethereum.png';
+}
+
+function populateTokenSelects(tokenList) {
+  const selects = ['swap-token-in', 'swap-token-out', 'send-token'];
+  selects.forEach(id => {
+    const sel = document.getElementById(id);
+    if (!sel) return;
+    const currentVal = sel.value;
+    sel.innerHTML = tokenList.map(t => {
+      const addrAttr = t.address ? `data-address="${t.address}"` : '';
+      const decAttr = t.decimals ? `data-decimals="${t.decimals}"` : 'data-decimals="18"';
+      return `<option value="${t.symbol}" data-symbol="${t.symbol}" ${addrAttr} ${decAttr}>${t.symbol}</option>`;
+    }).join('');
+    const optionExists = Array.from(sel.options).some(o => o.value === currentVal);
+    if (optionExists) sel.value = currentVal;
+  });
+}
+
+function updateTokenIcons() {
+  try {
+    const selIn = document.getElementById('swap-token-in');
+    const selOut = document.getElementById('swap-token-out');
+    const selSend = document.getElementById('send-token');
+
+    if (selIn) {
+      const opt = selIn.options[selIn.selectedIndex];
+      const sym = opt ? (opt.dataset && opt.dataset.symbol ? opt.dataset.symbol : opt.value) : null;
+      const img = document.getElementById('swap-token-in-icon');
+      if (img) img.src = getTokenIcon(sym);
+    }
+    if (selOut) {
+      const opt = selOut.options[selOut.selectedIndex];
+      const sym = opt ? (opt.dataset && opt.dataset.symbol ? opt.dataset.symbol : opt.value) : null;
+      const img = document.getElementById('swap-token-out-icon');
+      if (img) img.src = getTokenIcon(sym);
+    }
+    if (selSend) {
+      const opt = selSend.options[selSend.selectedIndex];
+      const sym = opt ? (opt.dataset && opt.dataset.symbol ? opt.dataset.symbol : opt.value) : null;
+      const img = document.getElementById('send-token-icon');
+      if (img) img.src = getTokenIcon(sym);
+    }
+  } catch (e) {
+    // ignore
+  }
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  const selIn = document.getElementById('swap-token-in');
+  const selOut = document.getElementById('swap-token-out');
+  const selSend = document.getElementById('send-token');
+  if (selIn) selIn.addEventListener('change', updateTokenIcons);
+  if (selOut) selOut.addEventListener('change', updateTokenIcons);
+  if (selSend) selSend.addEventListener('change', updateTokenIcons);
+  // initial icon set (delay slightly so DOM inserts finish)
+  setTimeout(updateTokenIcons, 120);
+});
+
 
 
 function renderTxItem(tx) {
   const status = tx.status || 'success';
+  const isSwap = tx.type === 'swap';
   const isOut = tx.type === 'out';
-  const dir = isOut ? 'out' : 'in';
-  const icon = isOut ? '↑' : '↓';
-  const statusClass = status === 'pending' ? 'pending' : status === 'success' ? 'confirmed' : 'failed';
-  const statusLabel = status === 'pending' ? 'PENDING' : status === 'success' ? 'CONFIRMED' : 'FAILED';
+  const dir = isSwap ? 'swap' : isOut ? 'out' : 'in';
+  const icon = isSwap ? '⇄' : isOut ? '↑' : '↓';
+  const statusClass = isSwap ? 'swap' : status === 'pending' ? 'pending' : status === 'success' ? 'confirmed' : 'failed';
+  const statusLabel = isSwap ? 'SWAP' : status === 'pending' ? 'PENDING' : status === 'success' ? 'CONFIRMED' : 'FAILED';
   const txJson = JSON.stringify(tx).replace(/"/g, '&quot;');
+
+  const amountLabel = isSwap
+    ? `${tx.amount} ${tx.tokenIn || ''} → ${tx.amountOut || '≈'} ${tx.tokenOut || ''}`
+    : `${fmtAmt(tx.amount, dir)} ${tx.asset || 'ETH'}`;
 
   return `
     <div class="tx-item" onclick="showTxDetail(JSON.parse(this.dataset.tx))" data-tx="${txJson}">
@@ -893,7 +1016,7 @@ function renderTxItem(tx) {
         <div class="tx-time">${fmtTime(tx.timestamp)}</div>
       </div>
       <div class="tx-amount">
-        <div class="tx-amount-val ${dir}">${fmtAmt(tx.amount, dir)} ETH</div>
+        <div class="tx-amount-val ${dir}">${amountLabel}</div>
         <div class="tx-status ${statusClass}">${statusLabel}</div>
       </div>
     </div>
@@ -901,15 +1024,23 @@ function renderTxItem(tx) {
 }
 
 function showTxDetail(tx) {
+  const isSwap = tx.type === 'swap';
+  const amountLabel = isSwap
+    ? `${tx.amount} ${tx.tokenIn || ''} → ${tx.amountOut || '≈'} ${tx.tokenOut || ''}`
+    : `${tx.amount} ${tx.asset || 'ETH'}`;
+  const totalLabel = isSwap
+    ? `${tx.amount} ${tx.tokenIn || ''} + ${tx.gasFee} ETH fee`
+    : `${amountLabel} + ${tx.gasFee} ETH fee`;
+
   document.getElementById('tx-detail-content').innerHTML = `
-    <div class="detail-row"><div class="detail-label">Hash (SHA-256)</div><div class="detail-val">${tx.hash || '—'}</div></div>
+    <div class="detail-row"><div class="detail-label">Hash</div><div class="detail-val">${tx.hash || '—'}</div></div>
     <div class="detail-row"><div class="detail-label">From</div><div class="detail-val">${tx.from}</div></div>
     <div class="detail-row"><div class="detail-label">To</div><div class="detail-val">${tx.to}</div></div>
-    <div class="detail-row"><div class="detail-label">Amount</div><div class="detail-val">${tx.amount} ETH</div></div>
+    <div class="detail-row"><div class="detail-label">Amount</div><div class="detail-val">${amountLabel}</div></div>
     <div class="detail-row"><div class="detail-label">Status</div><div class="detail-val">${tx.status || 'confirmed'}</div></div>
     <div class="detail-row"><div class="detail-label">Timestamp</div><div class="detail-val">${fmtTime(tx.timestamp)}</div></div>
     <div class="detail-row"><div class="detail-label">Total gas fee</div><div class="detail-val">${tx.gasFee} ETH</div></div>
-    <div class="detail-row"><div class="detail-label">Total</div><div class="detail-val">${parseFloat(tx.amount) + parseFloat(tx.gasFee)} ETH</div></div>
+    <div class="detail-row"><div class="detail-label">Summary</div><div class="detail-val">${totalLabel}</div></div>
     <div style="margin-top:8px">
       <button class="btn-primary" style="font-size:13px;padding:8px 16px" onclick="window.open('https://sepolia.etherscan.io/tx/${tx.hash}', '_blank')">View on block explorer</button>
     </div>
@@ -996,7 +1127,7 @@ async function runIntegrityAttack() {
   try {
     recoveredAddress = ethers.verifyMessage(tamperedData, _integritySignature);
     isValid = recoveredAddress.toLowerCase() === activeWallet.address.toLowerCase();
-  } catch(e) { isValid = false; recoveredAddress = 'ERROR'; }
+  } catch (e) { isValid = false; recoveredAddress = 'ERROR'; }
 
   const step = (num, cls, label, val) => `
     <div class="integrity-step">
@@ -1008,13 +1139,13 @@ async function runIntegrityAttack() {
     </div>`;
 
   resultEl.innerHTML = `
-    ${step(1, 'ok', '✅ Ký giao dịch gốc (amount = ' + original.amount + ' ETH)', 'Signature: ' + _integritySignature.slice(0,28) + '...')}
+    ${step(1, 'ok', '✅ Ký giao dịch gốc (amount = ' + original.amount + ' ETH)', 'Signature: ' + _integritySignature.slice(0, 28) + '...')}
     ${step(2, 'info', '📋 Hash giao dịch gốc', originalHash)}
     ${step(3, 'fail', '💀 Kẻ tấn công sửa amount → ' + tamperAmount + ' ETH', 'Hash bị sửa: ' + tamperedHash)}
     ${step(4, isValid ? 'fail' : 'ok',
-      isValid ? '❌ Chữ ký vẫn hợp lệ (lỗi!)' : '🔒 Xác minh: KHÔNG HỢP LỆ',
-      'Recovered: ' + recoveredAddress.slice(0,20) + '...\nWallet: ' + activeWallet.address.slice(0,20) + '...\nKhớp: ' + (isValid ? 'CÓ (lỗi!)' : 'KHÔNG → TỪ CHỐI')
-    )}
+    isValid ? '❌ Chữ ký vẫn hợp lệ (lỗi!)' : '🔒 Xác minh: KHÔNG HỢP LỆ',
+    'Recovered: ' + recoveredAddress.slice(0, 20) + '...\nWallet: ' + activeWallet.address.slice(0, 20) + '...\nKhớp: ' + (isValid ? 'CÓ (lỗi!)' : 'KHÔNG → TỪ CHỐI')
+  )}
     <div class="conclusion-box ${isValid ? 'fail' : 'success'}">
       ${isValid ? '⚠️ Phát hiện lỗi bảo mật!' : '✅ KẾT LUẬN: Dữ liệu bị sửa → Hash thay đổi → Chữ ký ECDSA không khớp → Giao dịch bị TỪ CHỐI.'}
     </div>`;
@@ -1073,7 +1204,7 @@ async function nonceStepSendTx() {
       </div>
       <div class="sign-result-item">
         <div class="sign-result-label">🔑 Signed TX Hex (đã tự động điền vào bước 2)</div>
-        <div class="sign-result-value" style="max-height:60px;overflow:auto">${signedTx.slice(0,80)}...</div>
+        <div class="sign-result-value" style="max-height:60px;overflow:auto">${signedTx.slice(0, 80)}...</div>
       </div>`;
 
     // Auto-fill vào bước 2
@@ -1112,7 +1243,7 @@ async function runReplayAttack() {
     const data = await api('/transaction/send', { method: 'POST', body: JSON.stringify({ signedTx }) });
     const result = data.result;
     if (m3) m3.classList.add('error');
-    resultEl.innerHTML = `<div class="conclusion-box fail">⚠ Giao dịch được chấp nhận! Hash: ${result.hash.slice(0,20)}...\n→ Nonce chưa bị dùng. Thử lại với signedTx đã broadcast.</div>`;
+    resultEl.innerHTML = `<div class="conclusion-box fail">⚠ Giao dịch được chấp nhận! Hash: ${result.hash.slice(0, 20)}...\n→ Nonce chưa bị dùng. Thử lại với signedTx đã broadcast.</div>`;
   } catch (e) {
     if (m3) m3.classList.add('completed');
     resultEl.innerHTML = `
@@ -1135,10 +1266,10 @@ async function runReplayAttack() {
 let _racePollingTimer = null;
 
 async function runRaceAttackDemo() {
-  const to       = document.getElementById('race-to').value.trim();
-  const amount   = document.getElementById('race-amount').value.trim();
+  const to = document.getElementById('race-to').value.trim();
+  const amount = document.getElementById('race-amount').value.trim();
   const resultEl = document.getElementById('race-result');
-  const btn      = document.getElementById('race-send-btn');
+  const btn = document.getElementById('race-send-btn');
 
   if (!activeWallet) {
     resultEl.innerHTML = '<span style="color:var(--yellow)">⚠ Vui lòng mở khoá ví trước.</span>';
@@ -1165,8 +1296,8 @@ async function runRaceAttackDemo() {
 
   try {
     // Lấy nonce & fee data
-    const nonce    = await provider.getTransactionCount(activeWallet.address);
-    const feeData  = await provider.getFeeData();
+    const nonce = await provider.getTransactionCount(activeWallet.address);
+    const feeData = await provider.getFeeData();
     const gasLimit = await provider.estimateGas({
       from: activeWallet.address, to,
       value: ethers.parseEther(amount)
@@ -1193,7 +1324,7 @@ async function runRaceAttackDemo() {
     txHash = data.result.hash;
     startTime = Date.now();
 
-    resultEl.innerHTML = `<span style="color:var(--green)">✅ Giao dịch đã broadcast! Hash: <a href="https://sepolia.etherscan.io/tx/${txHash}" target="_blank" style="color:var(--accent)">${txHash.slice(0,22)}...</a></span>`;
+    resultEl.innerHTML = `<span style="color:var(--green)">✅ Giao dịch đã broadcast! Hash: <a href="https://sepolia.etherscan.io/tx/${txHash}" target="_blank" style="color:var(--accent)">${txHash.slice(0, 22)}...</a></span>`;
 
     // Hiển thị pending card ngay lập tức
     _updatePendingMonitor(txHash, to, amount, nonce, 'pending', startTime);
@@ -1224,12 +1355,12 @@ async function runRaceAttackDemo() {
           // Vẫn pending → cập nhật timer
           _updatePendingMonitor(txHash, to, amount, nonce, 'pending', startTime);
         }
-      } catch(e) {
+      } catch (e) {
         // Bỏ qua lỗi mạng tạm thời
       }
     }, 5000);
 
-  } catch(e) {
+  } catch (e) {
     resultEl.innerHTML = `<span style="color:var(--red)">✗ Lỗi: ${e.message}</span>`;
     btn.disabled = false;
     btn.querySelector('span:last-child').textContent = 'Gửi & Monitor Pending';
@@ -1252,14 +1383,14 @@ function _updatePendingMonitor(hash, to, amount, nonce, status, startTime) {
         <a href="https://sepolia.etherscan.io/tx/${hash}" target="_blank"
            style="font-size:10px;color:var(--accent);font-family:var(--mono)">Etherscan ↗</a>
       </div>
-      <div class="ptx-hash">${hash.slice(0,30)}...</div>
-      <div class="ptx-row"><span class="ptx-label">To:</span><span class="ptx-val">${to.slice(0,18)}...</span></div>
+      <div class="ptx-hash">${hash.slice(0, 30)}...</div>
+      <div class="ptx-row"><span class="ptx-label">To:</span><span class="ptx-val">${to.slice(0, 18)}...</span></div>
       <div class="ptx-row"><span class="ptx-label">Amount:</span><span class="ptx-val">${amount} ETH</span></div>
       <div class="ptx-row"><span class="ptx-label">Nonce:</span><span class="ptx-val">${nonce}</span></div>
       <div class="ptx-timer ${status !== 'pending' ? 'done' : ''}">
         ${status === 'pending'
-          ? `⏱ Đã chờ: ${elapsed}s — Mạng đang xử lý...`
-          : `✓ Hoàn thành sau ${elapsed}s`}
+      ? `⏱ Đã chờ: ${elapsed}s — Mạng đang xử lý...`
+      : `✓ Hoàn thành sau ${elapsed}s`}
       </div>
       ${status === 'pending' ? `
       <div style="margin-top:8px;font-size:10px;color:var(--red);font-family:var(--sans)">
@@ -1386,11 +1517,16 @@ async function addNewAccount() {
 async function refreshAll() {
   try {
     if (activeWallet) {
+      const activeWalletData = await getWalletBalance(activeWallet.address);
+      tokens = activeWalletData.tokens;
+      walletBalanceUSD = activeWalletData.walletBalanceUSD;
+
       await refreshBalance();
-      renderSidebar();
+      await getAllWalletBalanceUSD();
       loadTokens();
+      renderSidebar();
     }
-    
+
   } catch (e) {
     toast('Error refreshing data', 'error');
   }
@@ -1427,6 +1563,471 @@ async function init() {
   } catch (err) {
     console.error(err);
     showCreateWalletScreen();
+  }
+}
+
+// ── CUSTOM TOKENS & SWAP ─────────────────────────────────
+async function importToken() {
+  const address = document.getElementById('import-token-address').value.trim();
+  const errEl = document.getElementById('import-token-error');
+  errEl.textContent = '';
+
+  if (!ethers.isAddress(address)) {
+    errEl.textContent = 'Invalid contract address';
+    return;
+  }
+
+  const btn = document.getElementById('import-token-btn');
+  btn.textContent = 'Importing...';
+
+  try {
+    const contract = new ethers.Contract(address, ["function symbol() view returns (string)", "function decimals() view returns (uint8)"], provider);
+    const symbol = await contract.symbol();
+    const decimals = Number(await contract.decimals());
+
+    await saveCustomToken({ address, symbol, decimals });
+
+    toast(`Imported token: ${symbol}`, 'success');
+    closeAllModals();
+    loadTokens(); // refresh token list
+
+    // Add to swap options if not already there
+    const selectOut = document.getElementById('swap-token-out');
+    if (selectOut && !Array.from(selectOut.options).some(o => o.value === address)) {
+      const opt = document.createElement('option');
+      opt.value = address;
+      opt.textContent = symbol;
+      opt.dataset.symbol = symbol;
+      selectOut.appendChild(opt);
+    }
+
+  } catch (err) {
+    errEl.textContent = 'Failed to fetch token info. Ensure it is a valid ERC-20 on Sepolia.';
+  } finally {
+    btn.innerHTML = '<span>Import Token</span>';
+  }
+}
+
+const swapAmountIn = document.getElementById('swap-amount-in');
+const swapAmountOut = document.getElementById('swap-amount-out');
+const swapErrEl = document.getElementById('swap-error');
+const swapTokenIn = document.getElementById('swap-token-in');
+const swapTokenOut = document.getElementById('swap-token-out');
+
+const SWAP_ROUTER_ADDRESS = '0xC532a74256D3Db42D0Bf7a0400fEFDbad7694008';
+let SWAP_WETH_ADDRESS = null;
+const SWAP_ABI = [
+  'function swapExactETHForTokens(uint amountOutMin,address[] calldata path,address to,uint deadline) external payable returns (uint[] memory amounts)',
+  'function swapExactTokensForETH(uint amountIn,uint amountOutMin,address[] calldata path,address to,uint deadline) external returns (uint[] memory amounts)',
+  'function swapExactTokensForTokens(uint amountIn,uint amountOutMin,address[] calldata path,address to,uint deadline) external returns (uint[] memory amounts)',
+  'function factory() external view returns (address)',
+  'function WETH() external view returns (address)',
+  'function getAmountsOut(uint amountIn,address[] calldata path) external view returns (uint[] memory amounts)'
+];
+const FACTORY_ABI = [
+  'function getPair(address tokenA,address tokenB) external view returns (address)'
+];
+const ERC20_ABI = [
+  'function approve(address spender,uint256 amount) external returns (bool)'
+];
+const routerContract = new ethers.Contract(SWAP_ROUTER_ADDRESS, SWAP_ABI, provider);
+
+async function getRouterWETH() {
+  if (!SWAP_WETH_ADDRESS) {
+    SWAP_WETH_ADDRESS = await routerContract.WETH();
+  }
+  return SWAP_WETH_ADDRESS;
+}
+
+
+async function validateSwapPath(path) {
+  if (!Array.isArray(path) || path.length < 2) return false;
+
+  const routerContract = new ethers.Contract(SWAP_ROUTER_ADDRESS, SWAP_ABI, provider);
+  const factoryAddress = await routerContract.factory();
+  const factory = new ethers.Contract(factoryAddress, FACTORY_ABI, provider);
+
+  for (let i = 0; i < path.length - 1; i++) {
+    const tokenA = ethers.getAddress(path[i]);
+    const tokenB = ethers.getAddress(path[i + 1]);
+    const pair = await factory.getPair(tokenA, tokenB);
+    if (!pair || pair === ethers.ZeroAddress) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+swapAmountIn.addEventListener('input', () => {
+  validateSwapAmount();
+  updateSwapEstimate();
+});
+if (swapTokenIn) swapTokenIn.addEventListener('change', () => {
+  validateSwapAmount();
+  updateSwapEstimate();
+  updateSwapIcons();
+});
+if (swapTokenOut) swapTokenOut.addEventListener('change', () => {
+  validateSwapAmount();
+  updateSwapEstimate();
+  updateSwapIcons();
+});
+
+function getSwapToken(value) {
+  const key = String(value).trim();
+  const symbol = key.toUpperCase();
+  let token = tokens.find(t => t.symbol?.toUpperCase() === symbol || (t.address && t.address.toLowerCase() === key.toLowerCase()));
+  if (token) return token;
+  if (symbol === 'ETH') return tokens[0];
+  return {
+    symbol: symbol,
+    address: key,
+    decimals: 18,
+    icon: getTokenIcon(symbol),
+    balance: 0
+  };
+}
+
+function getTokenUsdPrice(symbol, marketData) {
+  if (!marketData) return null;
+  const key = String(symbol).toLowerCase();
+  if (key === 'eth') return marketData.eth?.priceUSD ?? null;
+  if (key === 'usdc') return marketData.usdc?.priceUSD ?? 1;
+  if (key === 'link') return marketData.link?.priceUSD ?? null;
+  return marketData[key]?.priceUSD ?? null;
+}
+
+function validateSwapAmount() {
+  const amount = swapAmountIn.value;
+  const tokenIn = getSwapToken(swapTokenIn.value);
+  const tokenOut = getSwapToken(swapTokenOut.value);
+  swapErrEl.textContent = '';
+
+  if (!amount || isNaN(amount) || parseFloat(amount) <= 0) {
+    swapErrEl.textContent = 'Enter a valid amount';
+    swapAmountOut.value = '0.0';
+    return false;
+  }
+
+  if (!tokenIn || !tokenOut) {
+    swapErrEl.textContent = 'Select swap tokens';
+    swapAmountOut.value = '0.0';
+    return false;
+  }
+
+  if (tokenIn.symbol === tokenOut.symbol) {
+    swapErrEl.textContent = 'Select different tokens';
+    swapAmountOut.value = '0.0';
+    return false;
+  }
+
+  const balance = Number(tokenIn.balance ?? 0);
+  if (parseFloat(amount) > balance) {
+    swapErrEl.textContent = 'Insufficient balance';
+    return false;
+  }
+
+  swapErrEl.textContent = '';
+  return true;
+}
+
+function backToSwapForm() {
+  document.getElementById('swap-review').style.display = 'none';
+  document.querySelector('.swap-form').classList.remove('hidden');
+}
+
+async function prepareSwapReview() {
+  const errEl = swapErrEl;
+  errEl.textContent = '';
+
+  if (!activeWallet) {
+    errEl.textContent = 'Unlock your wallet before swapping';
+    return;
+  }
+
+  if (!validateSwapAmount()) return;
+
+  const tokenIn = getSwapToken(swapTokenIn.value);
+  const tokenOut = getSwapToken(swapTokenOut.value);
+  const amountIn = parseFloat(swapAmountIn.value || '0');
+  const amountOut = swapAmountOut.value || '0.0';
+
+  document.getElementById('swap-review').style.display = 'block';
+  document.getElementById('swap-review-from').textContent = activeWallet.address;
+  document.getElementById('swap-review-to').textContent = `${tokenIn.symbol} → ${tokenOut.symbol}`;
+  document.getElementById('swap-review-amount').textContent = `${amountIn.toFixed(4)} ${tokenIn.symbol}`;
+  document.getElementById('swap-review-receive').textContent = `${amountOut} ${tokenOut.symbol}`;
+  document.getElementById('swap-review-network').textContent = 'Sepolia';
+
+  document.querySelector('.swap-form').classList.add('hidden');
+  document.getElementById('swap-review').style.display = 'block';
+  document.getElementById('swap-review').scrollIntoView({ behavior: 'smooth', block: 'start' });
+
+  try {
+    const feeData = await provider.getFeeData();
+    const gasPrice = feeData.maxFeePerGas || feeData.gasPrice || 0n;
+    const fee = ethers.formatEther(210000n * gasPrice);
+    document.getElementById('swap-review-fee').textContent = `${fee} ETH`;
+  } catch (e) {
+    document.getElementById('swap-review-fee').textContent = 'Auto';
+  }
+}
+
+async function updateSwapEstimate() {
+  if (!swapAmountIn.value || isNaN(swapAmountIn.value) || parseFloat(swapAmountIn.value) <= 0) {
+    swapAmountOut.value = '0.0';
+    return;
+  }
+
+  const tokenIn = getSwapToken(swapTokenIn.value);
+  const tokenOut = getSwapToken(swapTokenOut.value);
+  if (!tokenIn || !tokenOut || tokenIn.symbol === tokenOut.symbol) {
+    swapAmountOut.value = '0.0';
+    return;
+  }
+
+  try {
+    const path = await buildSwapPath(tokenIn, tokenOut);
+    if (!path || path.length < 2) {
+      swapAmountOut.value = '0.0';
+      return;
+    }
+
+    const amountInWei = tokenIn.symbol === 'ETH'
+      ? ethers.parseEther(swapAmountIn.value)
+      : ethers.parseUnits(swapAmountIn.value, tokenIn.decimals || 18);
+
+    const amounts = await routerContract.getAmountsOut(amountInWei, path);
+    const outAmount = amounts[amounts.length - 1];
+
+    if (tokenOut.symbol === 'ETH') {
+      swapAmountOut.value = ethers.formatEther(outAmount);
+    } else {
+      swapAmountOut.value = ethers.formatUnits(outAmount, tokenOut.decimals || 18);
+    }
+  } catch (err) {
+    swapAmountOut.value = '0.0';
+  }
+}
+
+async function buildSwapPath(tokenIn, tokenOut) {
+  const weth = await getRouterWETH();
+  if (!weth) return null;
+
+  if (tokenIn.symbol === 'ETH') {
+    return [weth, tokenOut.address];
+  }
+  if (tokenOut.symbol === 'ETH') {
+    return [tokenIn.address, weth];
+  }
+  return [tokenIn.address, weth, tokenOut.address];
+}
+
+async function approveTokenIfNeeded(tokenIn, amountInWei, nonce, feeData) {
+  const approveInterface = new ethers.Interface(ERC20_ABI);
+  const approveData = approveInterface.encodeFunctionData('approve', [SWAP_ROUTER_ADDRESS, amountInWei]);
+  const approveGasLimit = await provider.estimateGas({
+    from: activeWallet.address,
+    to: tokenIn.address,
+    data: approveData
+  });
+
+  const approveTx = {
+    to: tokenIn.address,
+    data: approveData,
+    nonce,
+    gasLimit: approveGasLimit,
+    maxFeePerGas: feeData.maxFeePerGas,
+    maxPriorityFeePerGas: feeData.maxPriorityFeePerGas,
+    chainId: 11155111
+  };
+
+  const signedApprove = await activeWallet.signTransaction(approveTx);
+  const approveRes = await api('/transaction/send', {
+    method: 'POST',
+    body: JSON.stringify({ signedTx: signedApprove })
+  });
+
+  const approveHash = approveRes.result.hash || approveRes.result;
+  await provider.waitForTransaction(approveHash, 1, 120000);
+  return approveHash;
+}
+
+async function executeSwap() {
+  const errEl = swapErrEl;
+  errEl.textContent = '';
+
+  if (!activeWallet) {
+    errEl.textContent = 'Unlock your wallet before swapping';
+    return;
+  }
+
+  if (!validateSwapAmount()) return;
+
+  const tokenIn = getSwapToken(swapTokenIn.value);
+  const tokenOut = getSwapToken(swapTokenOut.value);
+  const amountIn = parseFloat(swapAmountIn.value);
+  const amountInWei = tokenIn.symbol === 'ETH'
+    ? ethers.parseEther(amountIn.toString())
+    : ethers.parseUnits(amountIn.toString(), tokenIn.decimals || 18);
+
+  const path = await buildSwapPath(tokenIn, tokenOut);
+  if (!path || path.some(p => !p)) {
+    errEl.textContent = 'Swap path could not be constructed. Please choose a valid token pair.';
+    return;
+  }
+
+  const routeOk = await validateSwapPath(path);
+  if (!routeOk) {
+    errEl.textContent = 'Swap route unavailable on the current router. Please choose a different pair.';
+    return;
+  }
+
+  const routerInterface = new ethers.Interface(SWAP_ABI);
+  const deadline = Math.floor(Date.now() / 1000) + 60 * 20;
+  let txData;
+  let txValue = 0n;
+
+  if (tokenIn.symbol === 'ETH') {
+    txData = routerInterface.encodeFunctionData('swapExactETHForTokens', [0, path, activeWallet.address, deadline]);
+    txValue = amountInWei;
+  } else if (tokenOut.symbol === 'ETH') {
+    txData = routerInterface.encodeFunctionData('swapExactTokensForETH', [amountInWei, 0, path, activeWallet.address, deadline]);
+  } else {
+    txData = routerInterface.encodeFunctionData('swapExactTokensForTokens', [amountInWei, 0, path, activeWallet.address, deadline]);
+  }
+
+  const btn = document.getElementById('swap-btn');
+  btn.disabled = true;
+  btn.querySelector('span:last-child').textContent = 'Swapping...';
+
+  try {
+    let nonce = await provider.getTransactionCount(activeWallet.address);
+    const feeData = await provider.getFeeData();
+
+    if (tokenIn.symbol !== 'ETH') {
+      await approveTokenIfNeeded(tokenIn, amountInWei, nonce, feeData);
+      nonce += 1;
+    }
+
+    const gasEstimate = await provider.estimateGas({
+      from: activeWallet.address,
+      to: SWAP_ROUTER_ADDRESS,
+      data: txData,
+      value: txValue
+    });
+
+    const tx = {
+      to: SWAP_ROUTER_ADDRESS,
+      data: txData,
+      value: txValue,
+      nonce,
+      gasLimit: gasEstimate,
+      maxFeePerGas: feeData.maxFeePerGas,
+      maxPriorityFeePerGas: feeData.maxPriorityFeePerGas,
+      chainId: 11155111
+    };
+
+    const signedTx = await activeWallet.signTransaction(tx);
+    const res = await api('/transaction/send', {
+      method: 'POST',
+      body: JSON.stringify({ signedTx })
+    });
+
+    const txHash = res.result.hash || res.result;
+    currentPendingTx = {
+      hash: txHash,
+      from: activeWallet.address,
+      to: SWAP_ROUTER_ADDRESS,
+      amount: amountIn,
+      amountOut: swapAmountOut.value || null,
+      tokenIn: tokenIn.symbol,
+      tokenOut: tokenOut.symbol,
+      type: 'swap',
+      status: 'pending',
+      timestamp: Date.now(),
+      gasFee: ethers.formatEther(gasEstimate * (feeData.maxFeePerGas || feeData.gasPrice))
+    };
+
+    addSwapHistoryEntry({ ...currentPendingTx });
+    document.getElementById('swap-review').style.display = 'none';
+    toast(`Swap transaction submitted! Hash: ${txHash.slice(0, 10)}...`, 'success');
+    activateTab('history');
+    pollPendingTransactionStatus(txHash);
+    swapAmountIn.value = '';
+    swapAmountOut.value = '0.0';
+  } catch (err) {
+    console.error(err);
+    errEl.textContent = 'Swap failed: ' + (err.reason || err.message);
+  } finally {
+    btn.disabled = false;
+    btn.querySelector('span:last-child').textContent = 'Swap';
+  }
+}
+
+async function getWalletBalance(address) {
+  const marketData = await api('/tokens/market');
+
+  const ethData = await api(`/wallet/${address}/eth-balance`);
+  const ethBalance = parseFloat(ethData.balance);
+
+  const tokens = [
+    {
+      name: 'Ethereum',
+      symbol: 'ETH',
+      icon: 'https://assets.coingecko.com/coins/images/279/thumb/ethereum.png',
+      price: ethBalance * marketData.eth.priceUSD,
+      change24h: marketData.eth.change24h,
+      balance: ethBalance,
+      badge: 'Earn',
+      address: '0xDa6F7b67eCBd74fecF96Eb40f24BDdFf1b460465',
+      decimals: 18
+    },
+    {
+      name: 'USD Coin',
+      symbol: 'USDC',
+      icon: 'https://assets.coingecko.com/coins/images/6319/thumb/USD_Coin_icon.png',
+      price: marketData.usdc.priceUSD,
+      change24h: marketData.usdc.change24h,
+      balance: 0,
+      badge: 'Stablecoin',
+      address: '0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238',
+      decimals: 6
+    },
+    {
+      name: 'Chainlink',
+      symbol: 'LINK',
+      icon: 'https://assets.coingecko.com/coins/images/877/thumb/chainlink-new-logo.png',
+      price: marketData.link.priceUSD,
+      change24h: marketData.link.change24h,
+      balance: 0,
+      badge: '',
+      address: '0x779877A7B0D9E8603169DdbD7836e478b4624789',
+      decimals: 18
+    }
+  ];
+
+  for (const t of tokens) {
+    if (t.name !== 'Ethereum') {
+      const tokenData = await api(`/wallet/${address}/token-balance?tokenAddress=${t.address}`);
+      const tokenBalance = parseFloat(tokenData.balance);
+      t.price *= tokenBalance;
+      t.balance = tokenBalance;
+    }
+  }
+
+  const walletBalanceUSD = tokens.reduce((acc, t) => acc + t.price, 0);
+
+
+  return { tokens, walletBalanceUSD };
+}
+
+async function getAllWalletBalanceUSD() {
+  for (let i = 0; i < allWallets.length; i++) {
+    const w = allWallets[i];
+    const walletData = await getWalletBalance(w.address)
+    w.balanceUSD = walletData.walletBalanceUSD
   }
 }
 

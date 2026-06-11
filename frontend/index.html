@@ -1,12 +1,12 @@
 <!DOCTYPE html>
 <html lang="vi">
+
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>CryptoVault — Simulated Blockchain Wallet</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Space+Mono:ital,wght@0,400;0,700;1,400&family=Syne:wght@400;600;700;800&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="css/style.css">
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CryptoVault — Simulated Blockchain Wallet</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
 <div id="app">
@@ -78,6 +78,7 @@
       <!-- TABS -->
       <div class="tabs">
         <button class="tab active" data-tab="tokens">Tokens</button>
+        <button class="tab" data-tab="swap">Swap</button>
         <button class="tab" data-tab="send">Send</button>
         <button class="tab" data-tab="history">History</button>
         <button class="tab" data-tab="attack">Attack Demo</button>
@@ -87,7 +88,60 @@
       <div id="tab-tokens" class="tab-content active">
         <h2>All Tokens</h2>
         <div id="token-list">
+        </div>
+        <button class="btn-ghost" style="margin-top: 16px; width: 100%;" onclick="openModal('import-token-modal')">+ Import Token</button>
+      </div>
 
+      <!-- SWAP TAB -->
+      <div id="tab-swap" class="tab-content">
+        <div class="swap-form">
+          <h2>Swap Tokens</h2>
+          <div class="form-group">
+            <label>Amount In</label>
+            <div class="amount-row">
+              <input type="number" id="swap-amount-in" placeholder="0.0" min="0.0001" step="0.0001">
+              <div class="token-select">
+                <img id="swap-token-in-icon" class="token-icon-small" src="https://assets.coingecko.com/coins/images/279/thumb/ethereum.png" alt="token">
+                <select id="swap-token-in" class="coin-label">
+                  <option value="ETH" data-symbol="ETH">ETH</option>
+                  <option value="USDC" data-symbol="USDC">USDC</option>
+                  <option value="LINK" data-symbol="LINK">LINK</option>
+                </select>
+              </div>
+            </div>
+          </div>
+          <div class="form-group">
+            <label>Amount Out (Estimated)</label>
+            <div class="amount-row">
+              <input type="number" id="swap-amount-out" placeholder="0.0" readonly style="color: var(--text3)">
+              <div class="token-select">
+                <img id="swap-token-out-icon" class="token-icon-small" src="https://assets.coingecko.com/coins/images/279/thumb/ethereum.png" alt="token">
+                <select id="swap-token-out" class="coin-label">
+                  <option value="ETH" data-symbol="ETH">ETH</option>
+                  <option value="USDC" data-symbol="USDC">USDC</option>
+                  <option value="LINK" data-symbol="LINK">LINK</option>
+                </select>
+              </div>
+            </div>
+          </div>
+          <div id="swap-error" class="error-msg"></div>
+          <button class="btn-primary btn-send" onclick="prepareSwapReview()" id="swap-btn">
+            <span id="swap-btn-text">Continue</span>
+            <span class="btn-icon">→</span>
+          </button>
+        </div>
+        <div id="swap-review" class="send-review" style="display:none; margin-top: 18px;">
+          <h2>Review Swap</h2>
+          <div class="review-row"><span class="review-label">Address</span><span id="swap-review-from" class="review-value monospace">—</span></div>
+          <div class="review-row"><span class="review-label">Swap</span><span id="swap-review-to" class="review-value monospace">—</span></div>
+          <div class="review-row"><span class="review-label">Amount In</span><span id="swap-review-amount" class="review-value">—</span></div>
+          <div class="review-row"><span class="review-label">Amount Out</span><span id="swap-review-receive" class="review-value">—</span></div>
+          <div class="review-row"><span class="review-label">Network</span><span id="swap-review-network" class="review-value">Sepolia</span></div>
+          <div class="review-row"><span class="review-label">Network fee</span><span id="swap-review-fee" class="review-value">Auto</span></div>
+          <div class="review-actions">
+            <button class="btn-ghost" onclick="backToSwapForm()">Cancel</button>
+            <button class="btn-primary" onclick="executeSwap()">Confirm Swap</button>
+          </div>
         </div>
       </div>
 
@@ -103,7 +157,14 @@
             <label>Amount</label>
             <div class="amount-row">
               <input type="number" id="send-amount" placeholder="0.0" min="0.0001" step="0.0001">
-              <span class="coin-label">ETH</span>
+              <div class="token-select">
+                <img id="send-token-icon" class="token-icon-small" src="https://assets.coingecko.com/coins/images/279/thumb/ethereum.png" alt="token">
+                <select id="send-token" class="coin-label">
+                  <option value="ETH" data-symbol="ETH">ETH</option>
+                  <option value="USDC" data-symbol="USDC" data-address="0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238" data-decimals="6">USDC</option>
+                  <option value="LINK" data-symbol="LINK" data-address="0x779877A7B0D9E8603169DdbD7836e478b4624789" data-decimals="18">LINK</option>
+                </select>
+              </div>
             </div>
           </div>
           <!-- <div class="form-group">
@@ -127,7 +188,8 @@
           <div class="review-row"><span class="review-label">To</span><span id="review-to" class="review-value monospace">—</span></div>
           <div class="review-row"><span class="review-label">Amount</span><span id="review-amount" class="review-value">—</span></div>
           <div class="review-row"><span class="review-label">Network</span><span id="review-network" class="review-value">Sepolia</span></div>
-          <div class="review-row"><span class="review-label">Network fee</span><span id="review-fee" class="review-value">—</span></div>          <div class="review-actions">
+          <div class="review-row"><span class="review-label">Network fee</span><span id="review-fee" class="review-value">—</span></div>
+          <div class="review-actions">
             <button class="btn-ghost" onclick="backToSendForm()">Cancel</button>
             <button class="btn-primary" onclick="sendTransaction()">Confirm</button>
           </div>
@@ -460,8 +522,8 @@
 <div id="forgot-password-modal" class="modal">
   <button class="modal-close" onclick="closeAllModals()">✕</button>
   <h2>Forgot your password?</h2>
-  <p class="modal-sub">We can’t recover your password for you.</p>
-  <p class="modal-sub">Add your wallet back to MetaMask by entering the Secret Recovery Phrase associated with it.</p>
+  <p class="modal-sub">We can't recover your password for you.</p>
+  <p class="modal-sub">Add your wallet back to CryptoVault by entering the Secret Recovery Phrase associated with it.</p>
   <div class="forgot-actions">
     <button class="btn-primary" onclick="openModal('import-wallet-modal')">Import Wallet</button>
     <button style="margin-top:16px" class="btn-ghost">I don't know my Phrase</button>
@@ -555,6 +617,22 @@
   <button class="modal-close" onclick="closeAllModals()">✕</button>
   <h2>Transaction Detail</h2>
   <div id="tx-detail-content"></div>
+</div>
+
+<!-- IMPORT TOKEN MODAL -->
+<div id="import-token-modal" class="modal">
+  <button class="modal-close" onclick="closeAllModals()">✕</button>
+  <h2>Import Token</h2>
+  <p class="modal-sub">Add custom ERC-20 tokens to your wallet on Sepolia.</p>
+  <div class="form-group">
+    <label>Token Contract Address</label>
+    <input type="text" id="import-token-address" placeholder="0x..." class="monospace">
+  </div>
+  <div id="import-token-info" style="margin-top: 10px; font-size: 13px; color: var(--text2);"></div>
+  <div id="import-token-error" class="error-msg"></div>
+  <button class="btn-primary" onclick="importToken()" id="import-token-btn" style="margin-top: 16px;">
+    <span>Import Token</span>
+  </button>
 </div>
 
 <div id="toast" class="toast"></div>

@@ -63,6 +63,7 @@ async function hasWallet() {
   });
 }
 
+
 async function getWallet() {
   const db = await openDB();
 
@@ -101,7 +102,37 @@ async function updateAccountCount(count) {
   });
 }
 
+async function saveCustomToken(token) {
+  const db = await openDB();
+
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE_NAME, "readwrite");
+    const store = tx.objectStore(STORE_NAME);
+
+    const getReq = store.get("main-wallet");
+
+    getReq.onsuccess = () => {
+      const data = getReq.result;
+      if (!data) return reject(new Error("Wallet not found"));
+      
+      if (!data.customTokens) data.customTokens = [];
+      // avoid duplicates
+      if (!data.customTokens.find(t => t.address.toLowerCase() === token.address.toLowerCase())) {
+        token.decimals = Number(token.decimals);
+        data.customTokens.push(token);
+      }
+      
+      const putReq = store.put(data);
+      putReq.onsuccess = () => resolve(true);
+      putReq.onerror = () => reject(putReq.error);
+    };
+
+    getReq.onerror = () => reject(getReq.error);
+  });
+}
+
 window.saveWallet = saveWallet;
 window.hasWallet = hasWallet;
 window.getWallet = getWallet;
 window.updateAccountCount = updateAccountCount;
+window.saveCustomToken = saveCustomToken;
