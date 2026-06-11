@@ -8,8 +8,8 @@ const { encryptMnemonic, decryptMnemonic } = require('../core/crypto');
 const crypto = require('crypto');
 const { getMarketData } = require('../ethereum/token');
 const { getTransactions, getGasFeeTransaction } = require('../ethereum/scanner');
-
-// ── TOKENS ──────────────────────────────────────────────
+const { runQuery, getQuery } = require('../core/database');
+const { authenticator } = require('otplib');// ── TOKENS ──────────────────────────────────────────────
 router.get('/tokens/market', async (req, res) => {
   try {
     const data = await getMarketData();
@@ -32,9 +32,20 @@ router.post("/wallet/create", async (req, res) => {
 
     const { encryptedMnemonic, iv, salt, authTag } = await encryptMnemonic(mnemonic, password);
 
+    const secret = authenticator.generateSecret();
+
+    // Save to local database
+    await runQuery(
+      `INSERT INTO wallets (address, totp_secret, encryptedMnemonic, iv) VALUES (?, ?, ?, ?)`,
+      [address, secret, encryptedMnemonic, iv.toString("hex")]
+    );
+
+    const totpUrl = authenticator.keyuri(address, 'CryptoVault', secret);
+
     res.json({
       address,
       mnemonic,
+      totpUrl,
       vault: {
         encryptedMnemonic,
         iv: iv.toString("hex"),
@@ -76,9 +87,21 @@ router.post('/wallet/import/mnemonic', async (req, res) => {
     const { address } = importWalletFromMnemonic(mnemonic);
 
     const { encryptedMnemonic, iv, salt, authTag } = await encryptMnemonic(mnemonic, password); 
+
+    const secret = authenticator.generateSecret();
+
+    // Save to local database
+    await runQuery(
+      `INSERT OR REPLACE INTO wallets (address, totp_secret, encryptedMnemonic, iv) VALUES (?, ?, ?, ?)`,
+      [address, secret, encryptedMnemonic, iv.toString("hex")]
+    );
+
+    const totpUrl = authenticator.keyuri(address, 'CryptoVault', secret);
+
     res.json({ 
       address, 
       mnemonic, 
+      totpUrl, 
       vault: { 
         encryptedMnemonic, 
         iv: iv.toString("hex"), 
@@ -110,13 +133,16 @@ router.post('/wallet/import', async (req, res) => {
     let encrypted = cipher.update(privateKey, "utf8", "hex");
     encrypted += cipher.final("hex");
 
-    await Wallet.create({
-      address: address,
-      encryptedPrivateKey: encrypted,
-      iv: iv.toString("hex")
-    });
+    const secret = authenticator.generateSecret();
 
-    res.json({ address: address });
+    await runQuery(
+      `INSERT OR REPLACE INTO wallets (address, totp_secret, encryptedPrivateKey, iv) VALUES (?, ?, ?, ?)`,
+      [address, secret, encrypted, iv.toString("hex")]
+    );
+
+    const totpUrl = authenticator.keyuri(address, 'CryptoVault', secret);
+
+    res.json({ address: address, totpUrl });
   } catch (e) {
     res.status(400).json({ error: e.message });
   }
@@ -128,7 +154,7 @@ router.post('/wallet/mnemonic', async (req, res) => {
     const { address, password } = req.body;
     if (!address || !password) return res.status(400).json({ error: 'Address and password required' });
     
-    const walletDoc = await Wallet.findOne({ address });
+    const walletDoc = await getQuery(`SELECT * FROM wallets WHERE address = ?`, [address]);
     if (!walletDoc || !walletDoc.encryptedMnemonic) {
       return res.status(400).json({ error: 'Wallet not found or mnemonic not available' });
     }
@@ -141,6 +167,62 @@ router.post('/wallet/mnemonic', async (req, res) => {
     res.json({ mnemonic });
   } catch (e) {
     res.status(400).json({ error: e.message });
+  }
+});
+
+// ── OTP ENDPOINTS ─────────────────────────────────────────
+
+router.post('/otp/verify', async (req, res) => {
+  try {
+    const { address, otp } = req.body;
+    if (!address || !otp) return res.status(400).json({ error: 'Address and OTP required' });
+
+    const walletDoc = await getQuery(`SELECT * FROM wallets WHERE address = ?`, [address]);
+    if (!walletDoc || !walletDoc.totp_secret) {
+      return res.status(400).json({ error: 'Wallet not found or TOTP not set up.' });
+    }
+
+    // Check if wallet is locked
+    const now = Date.now();
+    if (walletDoc.locked_until && walletDoc.locked_until > now) {
+      const remainingMinutes = Math.ceil((walletDoc.locked_until - now) / 60000);
+      return res.status(403).json({ error: `Too many failed attempts. Try again in ${remainingMinutes} minute(s).` });
+    }
+
+    const isValid = authenticator.check(otp, walletDoc.totp_secret);
+
+    if (!isValid) {
+      let failedAttempts = (walletDoc.failed_attempts || 0) + 1;
+      let lockedUntil = walletDoc.locked_until || 0;
+
+      if (failedAttempts >= 5) {
+        lockedUntil = now + 15 * 60 * 1000; // Lock for 15 minutes
+        failedAttempts = 0; // Reset after locking so they get 5 more tries AFTER the lock expires
+      }
+
+      await runQuery(
+        `UPDATE wallets SET failed_attempts = ?, locked_until = ? WHERE address = ?`,
+        [failedAttempts, lockedUntil, address]
+      );
+
+      if (lockedUntil > now) {
+        return res.status(403).json({ error: `Too many failed attempts. Try again in 15 minute(s).` });
+      } else {
+        return res.status(400).json({ error: `Invalid OTP. You have ${5 - failedAttempts} attempt(s) left.` });
+      }
+    }
+
+    // Success - Reset counters
+    if (walletDoc.failed_attempts > 0 || walletDoc.locked_until > 0) {
+      await runQuery(
+        `UPDATE wallets SET failed_attempts = 0, locked_until = 0 WHERE address = ?`,
+        [address]
+      );
+    }
+
+    res.json({ success: true, message: 'OTP Verified' });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
   }
 });
 

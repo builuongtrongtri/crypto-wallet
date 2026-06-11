@@ -5,6 +5,11 @@ const url = `https://eth-sepolia.g.alchemy.com/v2/${process.env.ALCHEMY_API_KEY}
 
 
 async function getTransactions(address) {
+  if (!process.env.ALCHEMY_API_KEY) {
+    console.warn("⚠️ ALCHEMY_API_KEY is missing. Returning empty history.");
+    return [];
+  }
+
   const baseBody = {
     jsonrpc: "2.0",
     id: 1,
@@ -52,6 +57,8 @@ async function getTransactions(address) {
 }
 
 async function getGasFeeTransaction(txHash) {
+  if (!process.env.ALCHEMY_API_KEY) return {};
+  
   const res = await axios.post(url, {
     jsonrpc: "2.0",
     id: 1,
