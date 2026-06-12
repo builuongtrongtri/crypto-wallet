@@ -1,5 +1,5 @@
 const { ethers } = require('ethers');
-const { provider } = require('./provider');
+const { provider, abi } = require('./provider');
 
 function createWallet() {
   const wallet = ethers.Wallet.createRandom();
@@ -39,8 +39,16 @@ async function getEthBalance(address) {
   return ethers.formatEther(ethBalance);
 }
 
+async function getTokenBalance(walletAddress, tokenAddress) {
+  const token = new ethers.Contract(tokenAddress, abi, provider);
+  const balance = await token.balanceOf(walletAddress);
+  const decimals = await token.decimals();
+  return ethers.formatUnits(balance, decimals);
+}
+
 module.exports = {
   createWallet,
   getEthBalance,
+  getTokenBalance,
   importWalletFromMnemonic
 };
